@@ -22,6 +22,8 @@ class Meshes:
         self._num_verts_per_mesh = None
         self._num_faces_per_mesh = None
 
+        self._check_for_verts_and_faces(verts, faces)
+
     def _check_for_verts_and_faces(self, verts, faces):
         if isinstance(verts, list) and isinstance(faces, list):
             self._verts_list = verts
@@ -32,7 +34,7 @@ class Meshes:
                 for face in faces
             ]
             self._N = len(self._verts_list)
-            self.is_valid = mx.zeros((self._N,), dtype=mx.bool_, device=self.device)
+            self.is_valid = mx.zeros((self._N,), dtype=mx.bool_, stream=self.device)
 
             if self._N > 0:
                 self._num_verts_per_mesh = mx.array(
@@ -49,7 +51,7 @@ class Meshes:
                         for verts, faces in zip(self._verts_list, self._faces_list)
                     ],
                     dtype=mx.bool_,
-                    device=self.device,
+                    stream=self.device,
                 )
                 if (unique_num_items(self._num_verts_per_mesh) == 1) and (
                     unique_num_items(self._num_faces_per_mesh) == 1
@@ -70,25 +72,25 @@ class Meshes:
             self._verts_padded = verts
             self._faces_padded = faces.astype(mx.int64)
 
-            self.is_valid = mx.zeros((self._N,), dtype=mx.bool_, device=self.device)
+            self.is_valid = mx.zeros((self._N,), dtype=mx.bool_, stream=self.device)
 
             if self._N > 0:
-                faces_not_padded = mx.all(mx.greater(faces, -1), axis=2)
+                faces_not_padded = mx.greater(faces, -1).all(2)
                 self._num_faces_per_mesh = mx.sum(faces_not_padded, axis=1)
-                if mx.any(faces_not_padded[:, :, :-1] < faces_not_padded[:, :, 1:]):
+                if (faces_not_padded[:, :-1] < faces_not_padded[:, 1:]).any():
                     raise ValueError("Padding of faces must be at the end of the array")
 
                 self.is_valid = self._num_faces_per_mesh > 0
                 self._F = self._num_faces_per_mesh.max()
-                
+
                 if unique_num_items(self._num_faces_per_mesh) == 1:
                     self.equisized = True
 
                 self._num_verts_per_mesh = mx.full(
                     shape=(self._N,),
-                    fill_value=self._V,
+                    vals=self._V,
                     dtype=mx.int64,
-                    device=self.device,
+                    stream=self.device,
                 )
         else:
             raise ValueError("verts and faces must be of type list or mx.array")

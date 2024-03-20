@@ -3,4 +3,4 @@ from .array_utils import (
 )
 
 
-__all__ = [k for k in globals().keys() if not k.startwith("_")]
+__all__ = [k for k in globals().keys() if not k.startswith("_")]
