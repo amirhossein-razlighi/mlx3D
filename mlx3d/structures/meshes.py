@@ -26,23 +26,25 @@ class Meshes:
 
     def _check_for_verts_and_faces(self, verts, faces):
         if isinstance(verts, list) and isinstance(faces, list):
+            verts = [mx.array(verts_i) for verts_i in verts]
+            faces = [mx.array(faces_i) for faces_i in faces]
             self._verts_list = verts
             self._faces_list = [
-                face[mx.greater(face, -1).all(1)].astype(mx.int64)
+                boolean_indexing(face, mx.greater(face, -1).all(1)).astype(mx.int64)
                 if len(face) > 0
                 else face
                 for face in faces
-            ]
+            ]  # TODO: replace this whenever boolean_indexing is implemented in mlx
             self._N = len(self._verts_list)
             self.is_valid = mx.zeros((self._N,), dtype=mx.bool_, stream=self.device)
 
             if self._N > 0:
                 self._num_verts_per_mesh = mx.array(
-                    [len(verts) for verts in self._verts_list], device=self.device
+                    [len(verts) for verts in self._verts_list]
                 )
                 self._V = self._num_verts_per_mesh.max()
                 self._num_faces_per_mesh = mx.array(
-                    [len(faces) for faces in self._faces_list], device=self.device
+                    [len(faces) for faces in self._faces_list]
                 )
                 self._F = self._num_faces_per_mesh.max()
                 self.is_valid = mx.array(
@@ -51,7 +53,6 @@ class Meshes:
                         for verts, faces in zip(self._verts_list, self._faces_list)
                     ],
                     dtype=mx.bool_,
-                    stream=self.device,
                 )
                 if (unique_num_items(self._num_verts_per_mesh) == 1) and (
                     unique_num_items(self._num_faces_per_mesh) == 1
