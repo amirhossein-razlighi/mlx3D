@@ -1,6 +1,7 @@
 import unittest
 import mlx.core as mx
 from mlx3d.structures.meshes import Meshes
+import numpy as np
 
 class TestMeshStructure(unittest.TestCase):
     def test_with_array_simple(self):
@@ -29,5 +30,5 @@ class TestMeshStructure(unittest.TestCase):
           self.assertEqual(meshes.is_valid, mx.array([True], dtype=mx.bool_))
           self.assertEqual(meshes._num_verts_per_mesh, mx.array([3]))
           self.assertEqual(meshes._num_faces_per_mesh, mx.array([1]))
-          self.assertEqual(meshes._verts_list, verts)
-          self.assertEqual(meshes._faces_list, faces)
+          self.assert_((np.array(meshes._verts_list) == np.array(verts)).all())
+          self.assert_((np.array(meshes._faces_list) == np.array(faces)).all())

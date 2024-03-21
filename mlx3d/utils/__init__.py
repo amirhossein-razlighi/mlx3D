@@ -1,5 +1,6 @@
 from .array_utils import (
     unique_num_items,
+    boolean_indexing,
 )
 
 

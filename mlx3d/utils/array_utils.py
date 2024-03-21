@@ -10,3 +10,11 @@ def unique_num_items(a: mx.array):
     uniques_ = set(flat_array)
 
     return len(uniques_)
+
+
+def boolean_indexing(a: mx.array, b: mx.array):
+    new_array = mx.zeros((0, a.shape[1]), dtype=a.dtype)
+    for i in range(a.shape[0]):
+        if b[i]:
+            new_array = mx.concatenate((new_array, mx.expand_dims(a[i], axis=0)))
+    return new_array
