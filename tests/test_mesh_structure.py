@@ -30,5 +30,5 @@ class TestMeshStructure(unittest.TestCase):
           self.assertEqual(meshes.is_valid, mx.array([True], dtype=mx.bool_))
           self.assertEqual(meshes._num_verts_per_mesh, mx.array([3]))
           self.assertEqual(meshes._num_faces_per_mesh, mx.array([1]))
-          self.assert_((np.array(meshes._verts_list) == np.array(verts)).all())
-          self.assert_((np.array(meshes._faces_list) == np.array(faces)).all())
+          self.assertTrue((np.array(meshes._verts_list) == np.array(verts)).all())
+          self.assertTrue((np.array(meshes._faces_list) == np.array(faces)).all())
