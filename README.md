@@ -1,7 +1,10 @@
 # Mlx3D
-A library for deep learning with 3D data using MLX.
+<p align="center">
+  <img src="./Logo.jpeg" height="250" width="auto">
+  <h2 style="border-bottom: none;"> A library for deep learning with 3D data using mlx </h2>
+</p>
 
-[Still in early stage of development.]
+[Still in early stages of development.]
 
 # Introduction
 Mlx3D provides efficient, fast and reusable components for 3D Computer Vision research with [MLX](https://github.com/ml-explore/mlx) (Machine learning research on Apple Silicon).
