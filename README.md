@@ -1,5 +1,5 @@
 # Mlx3D
-A library for deep learning with 3D data using mlx
+A library for deep learning with 3D data using MLX.
 
 [Still in early stage of development.]
 
