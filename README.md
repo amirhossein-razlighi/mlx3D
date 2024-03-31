@@ -1,6 +1,6 @@
 # Mlx3D : A library for deep learning with 3D data using mlx
 <p align="center">
-  <img src="./Logo.jpeg" height="50%" width="auto" />
+  <img src="./Logo.jpeg" height="auto" width="75%" />
 </p>
 
 # Introduction
