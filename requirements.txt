@@ -1,0 +1,5 @@
+mlx
+mlx-data
+matplotlib
+plotly
+imageio
