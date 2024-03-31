@@ -1,0 +1,46 @@
+version: 2.1
+
+parameters:
+  nightly_build:
+    type: boolean
+    default: false
+  weekly_build:
+    type: boolean
+    default: false
+  test_release:
+    type: boolean
+    default: false
+
+jobs:
+  mac_build_and_test:
+    parameters:
+        xcode_version:
+          type: string
+          default: "15.2.0"
+    macos:
+        xcode: << parameters.xcode_version >>
+    resource_class: macos.m1.large.gen1
+    steps:
+        - checkout
+        - run:
+            name: Install dependencies
+            command: |
+                brew install python@3.8
+                python3.8 -m venv env
+                source env/bin/activate
+                pip install --upgrade pip
+                pip install mlx
+                pip install numpy
+                pip install imageio matplotlib pillow
+                pip install unittest-xml-reporting
+        # - run:
+        #     name: Install MLX3D Python Packages
+        #     command: |
+        #         source env/bin/activate
+
+        - run:
+            name: Run unit tests
+            command: |
+                source env/bin/activate 
+                python -m xmlrunner discover -s tests/ -o test-reports
+
