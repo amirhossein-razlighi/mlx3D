@@ -11,10 +11,10 @@ Welcome to mlx3d's documentation!
    :caption: Contents:
 
 
+   main.md
+.. Indices and tables
+.. ==================
 
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
+.. * :ref:`genindex`
+.. * :ref:`modindex`
+.. * :ref:`search`
