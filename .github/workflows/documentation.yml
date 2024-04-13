@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-python@v3
       - name: Install dependencies
         run: |
-          pip install sphinx sphinx_rtd_theme myst_parser
+          pip install sphinx myst_parser sphinx-book-theme
       - name: Sphinx build
         run: |
           sphinx-build documentation/source _build
