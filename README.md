@@ -6,6 +6,12 @@
 # Introduction
 Mlx3D provides efficient, fast and reusable components for 3D Computer Vision research with [MLX](https://github.com/ml-explore/mlx) (Machine learning research on Apple Silicon).
 
+# Installation
+This package is available on PyPi and can be installed easily with any python package manager:
+```bash
+pip install mlx3d
+```
+
 # Development
 As we are in an **early stages of development**, we are looking for contributors to help us build this library. If you are interested in contributing, please feel free to file an issue and get started!
 
