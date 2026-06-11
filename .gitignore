@@ -163,3 +163,4 @@ cython_debug/
 outputs/outputs/
 site/
 outputs/
+*cache/
