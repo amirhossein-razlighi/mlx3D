@@ -1,0 +1,82 @@
+site_name: MLX3D
+site_description: Differentiable 3D computer vision on Apple Silicon, built on MLX
+site_url: https://amirhossein-razlighi.github.io/mlx3D/
+repo_url: https://github.com/amirhossein-razlighi/mlx3D
+repo_name: mlx3D
+
+theme:
+  name: material
+  logo: assets/logo.jpeg
+  favicon: assets/logo.jpeg
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.arithmatex:
+      generic: true
+  - toc:
+      permalink: true
+
+extra_javascript:
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            members_order: source
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Quickstart: quickstart.md
+      - Conventions: conventions.md
+      - Interactive Viewer: viewer.md
+  - Tutorials:
+      - Mesh Optimization: tutorials/mesh_optimization.md
+      - Point Cloud Fitting: tutorials/pointcloud_fitting.md
+      - "NeRF: Neural Radiance Fields": tutorials/nerf.md
+      - Gaussian Splatting: tutorials/gaussian_splatting.md
+  - API Reference:
+      - Structures: api/structures.md
+      - Cameras: api/cameras.md
+      - Transforms: api/transforms.md
+      - IO: api/io.md
+      - Ops: api/ops.md
+      - Losses: api/losses.md
+      - Renderer: api/renderer.md
+      - Neural Networks: api/nn.md
+      - Gaussian Splatting: api/splatting.md
+      - Datasets: api/datasets.md
+      - Viewer: api/viewer.md
+      - Utils: api/utils.md
