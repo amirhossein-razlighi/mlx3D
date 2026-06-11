@@ -202,3 +202,24 @@ def test_trainer_densification_runs():
         info = trainer.step(cam, target)
     # Densification triggered at least once and the model kept training.
     assert np.isfinite(info["loss"])
+
+
+def test_trainer_max_gaussians_cap():
+    mx.random.seed(5)
+    cam = Camera.look_at(eye=(0.0, 0.0, -3.0), at=(0, 0, 0), width=32, height=32)
+    target = mx.random.uniform(shape=(32, 32, 3))
+    model = GaussianModel.from_points(mx.random.normal((40, 3)) * 0.4, sh_degree=0)
+    config = TrainerConfig(
+        densify_from=2, densify_every=4, densify_grad_threshold=1e-9,
+        max_gaussians=45, low_memory=True, cache_limit_gb=0.5,
+    )
+    trainer = GaussianTrainer(model, config)
+    counts = [trainer.step(cam, target)["num_gaussians"] for _ in range(20)]
+    # Growth happens but never runs far past the cap (one growth round may
+    # land above it; afterwards growth is disabled).
+    assert max(counts) > 40
+    assert counts[-1] <= 45 * 2  # bounded, not exponential
+    # After hitting the cap, count must not keep increasing.
+    capped = [c for c in counts if c >= 45]
+    if len(capped) >= 2:
+        assert capped[-1] <= capped[0]

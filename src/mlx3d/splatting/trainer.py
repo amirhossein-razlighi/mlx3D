@@ -39,6 +39,14 @@ class TrainerConfig:
     opacity_reset_every: int = 3000
     sh_increase_every: int = 1000
     white_background: bool = False
+    # Low-memory controls.
+    max_gaussians: int | None = None
+    """Stop clone/split growth above this count (pruning continues)."""
+    low_memory: bool = False
+    """Cap MLX's buffer cache and clear it after densification events.
+    Reduces peak memory noticeably on 8-16 GB machines at a small speed cost."""
+    cache_limit_gb: float = 2.0
+    """MLX buffer-cache cap used when ``low_memory`` is enabled."""
 
 
 class GaussianTrainer:
@@ -50,6 +58,11 @@ class GaussianTrainer:
         self.config = config or TrainerConfig()
         self.scene_extent = scene_extent
         self.step_count = 0
+        if self.config.low_memory:
+            # MLX caches freed GPU buffers for reuse; under shape churn
+            # (densification changes N every 100 steps) the cache can grow
+            # by gigabytes. Cap it, and clear at densification events below.
+            mx.set_cache_limit(int(self.config.cache_limit_gb * (1 << 30)))
         self._build_optimizers()
         self._reset_grad_accum()
 
@@ -123,6 +136,9 @@ class GaussianTrainer:
             self.model.params[k] = opt.apply_gradients(
                 {k: param_grads[k]}, {k: self.model.params[k]}
             )[k]
+        # Release gradient references before evaluating so their buffers can
+        # be recycled within the same step (see the MLX performance guide).
+        del param_grads, grads
         mx.eval(self.model.params)
 
         # Accumulate NDC-space positional gradient norms for densification.
@@ -139,14 +155,24 @@ class GaussianTrainer:
                 self.step_count % cfg.densify_every == 0
                 and self.step_count > cfg.densify_from
             ):
+                # At the cap, disable growth (infinite threshold) but keep
+                # pruning so the count can recover below the cap.
+                at_cap = (
+                    cfg.max_gaussians is not None
+                    and self.model.num_gaussians >= cfg.max_gaussians
+                )
+                threshold = float("inf") if at_cap else cfg.densify_grad_threshold
                 self.model.densify_and_prune(
                     mx.array(self.grad_accum.astype(np.float32)),
                     mx.array(self.grad_count.astype(np.float32)),
-                    grad_threshold=cfg.densify_grad_threshold,
+                    grad_threshold=threshold,
                     scene_extent=self.scene_extent,
                 )
                 self._build_optimizers()  # parameter shapes changed
                 self._reset_grad_accum()
+                if cfg.low_memory:
+                    mx.eval(self.model.params)
+                    mx.clear_cache()
 
         if self.step_count % cfg.opacity_reset_every == 0 and self.step_count <= cfg.densify_until:
             self.model.reset_opacities()

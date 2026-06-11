@@ -33,20 +33,30 @@ def main() -> None:
     parser.add_argument("--init-points", type=int, default=30000,
                         help="random init size for blender scenes (no SfM points)")
     parser.add_argument("--out", type=str, default="outputs/gs")
+    parser.add_argument("--low-mem", action="store_true",
+                        help="low-memory mode for 8-16 GB machines: uint8 image "
+                             "cache, capped Gaussian count, capped MLX buffer cache")
+    parser.add_argument("--image-cache", choices=["ram", "uint8", "disk"], default=None,
+                        help="image storage policy (default: ram, or uint8 with --low-mem)")
+    parser.add_argument("--max-gaussians", type=int, default=None,
+                        help="cap on the Gaussian count (default: 1.2M with --low-mem)")
     args = parser.parse_args()
+
+    image_cache = args.image_cache or ("uint8" if args.low_mem else "ram")
+    max_gaussians = args.max_gaussians or (1_200_000 if args.low_mem else None)
 
     print("Loading dataset...")
     if args.format == "colmap":
         from mlx3d.datasets import load_colmap
 
-        ds = load_colmap(args.data, downscale=args.downscale)
+        ds = load_colmap(args.data, downscale=args.downscale, cache=image_cache)
         init_points, init_colors = ds.points, ds.point_colors
         scene_extent = ds.scene_extent
         white_bg = False
     else:
         from mlx3d.datasets import load_blender
 
-        ds = load_blender(args.data, "train", downscale=args.downscale)
+        ds = load_blender(args.data, "train", downscale=args.downscale, cache=image_cache)
         # Random init inside the synthetic scenes' bounding box.
         init_points = mx.random.uniform(low=-1.5, high=1.5, shape=(args.init_points, 3))
         init_colors = mx.random.uniform(shape=(args.init_points, 3))
@@ -57,7 +67,12 @@ def main() -> None:
           f"extent {scene_extent:.2f}")
 
     model = GaussianModel.from_points(init_points, init_colors, sh_degree=args.sh_degree)
-    config = TrainerConfig(white_background=white_bg, densify_until=args.iters // 2)
+    config = TrainerConfig(
+        white_background=white_bg,
+        densify_until=args.iters // 2,
+        max_gaussians=max_gaussians,
+        low_memory=args.low_mem,
+    )
     trainer = GaussianTrainer(model, config, scene_extent=scene_extent)
 
     os.makedirs(args.out, exist_ok=True)

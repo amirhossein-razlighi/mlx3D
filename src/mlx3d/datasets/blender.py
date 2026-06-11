@@ -9,6 +9,7 @@ import mlx.core as mx
 import numpy as np
 
 from ..cameras import Camera
+from .images import ImageCollection
 
 __all__ = ["BlenderDataset", "load_blender"]
 
@@ -16,7 +17,7 @@ __all__ = ["BlenderDataset", "load_blender"]
 @dataclass
 class BlenderDataset:
     cameras: list[Camera]
-    images: list[mx.array]  # (H, W, 3) in [0, 1], alpha-composited onto white or black
+    images: ImageCollection  # (H, W, 3) in [0, 1], alpha-composited onto white or black
 
     def __len__(self) -> int:
         return len(self.cameras)
@@ -44,6 +45,7 @@ def load_blender(
     split: str = "train",
     downscale: int = 1,
     white_background: bool = True,
+    cache: str = "ram",
 ) -> BlenderDataset:
     """Load a Blender-synthetic scene (lego, chair, ...).
 
@@ -52,29 +54,22 @@ def load_blender(
         split: ``"train"``, ``"val"`` or ``"test"``.
         downscale: integer image downscaling factor.
         white_background: composite the RGBA renders onto white (else black).
+        cache: image storage policy (``"ram"``, ``"uint8"`` or ``"disk"``);
+            see :class:`~mlx3d.datasets.images.ImageCollection`.
     """
-    from PIL import Image
-
     with open(os.path.join(root, f"transforms_{split}.json")) as f:
         meta = json.load(f)
 
     cameras: list[Camera] = []
-    images: list[mx.array] = []
+    images = ImageCollection(
+        cache=cache, downscale=downscale, white_background=white_background
+    )
     for frame in meta["frames"]:
         img_path = os.path.join(root, frame["file_path"] + ".png")
         if not os.path.exists(img_path):
             img_path = os.path.join(root, frame["file_path"])
-        img = Image.open(img_path)
-        if downscale > 1:
-            img = img.resize((img.width // downscale, img.height // downscale), Image.LANCZOS)
-        rgba = np.asarray(img, dtype=np.float32) / 255.0
-        if rgba.shape[-1] == 4:
-            rgb, a = rgba[..., :3], rgba[..., 3:]
-            bg = 1.0 if white_background else 0.0
-            rgb = rgb * a + bg * (1.0 - a)
-        else:
-            rgb = rgba[..., :3]
-        H, W = rgb.shape[:2]
+        images.append_file(img_path)
+        H, W = images.shape_of(len(images) - 1)
 
         focal = 0.5 * W / math.tan(0.5 * meta["camera_angle_x"])
         R, t = _c2w_opengl_to_opencv_extrinsics(
@@ -84,6 +79,5 @@ def load_blender(
             Camera(R=R, t=t, fx=focal, fy=focal, cx=W / 2.0, cy=H / 2.0,
                    width=W, height=H, znear=0.01, zfar=100.0)
         )
-        images.append(mx.array(rgb))
 
     return BlenderDataset(cameras=cameras, images=images)

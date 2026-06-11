@@ -4,6 +4,7 @@ import struct
 
 import mlx.core as mx
 import numpy as np
+import pytest
 from PIL import Image
 
 from mlx3d.datasets import load_blender, load_colmap
@@ -98,3 +99,34 @@ def test_load_colmap(tmp_path):
     # tvec=(0,0,2), R=I -> camera center at (0,0,-2).
     np.testing.assert_allclose(np.array(cam.camera_center), [0, 0, -2.0], atol=1e-5)
     assert ds.scene_extent > 0
+
+
+@pytest.mark.parametrize("cache", ["ram", "uint8", "disk"])
+def test_image_cache_modes_identical(tmp_path, cache):
+    root = str(tmp_path)
+    _write_blender_scene(root)
+    ds = load_blender(root, "train", cache=cache)
+    img = ds.images[0]
+    assert img.shape == (32, 32, 3)
+    assert img.dtype == mx.float32
+    np.testing.assert_allclose(np.array(img[16, 16]), [1.0, 0.0, 0.0], atol=1e-2)
+    np.testing.assert_allclose(np.array(img[0, 0]), [1.0, 1.0, 1.0], atol=1e-2)
+    # Resident memory ordering: disk < uint8 < ram.
+    if cache == "disk":
+        assert ds.images.nbytes_resident == 0
+    elif cache == "uint8":
+        assert ds.images.nbytes_resident == 3 * 32 * 32 * 3
+    else:
+        assert ds.images.nbytes_resident == 3 * 32 * 32 * 3 * 4
+
+
+@pytest.mark.parametrize("cache", ["uint8", "disk"])
+def test_colmap_cache_modes(tmp_path, cache):
+    root = str(tmp_path)
+    _write_colmap_scene(root)
+    ds = load_colmap(root, cache=cache)
+    cam, img = ds[0]
+    assert img.shape == (16, 16, 3)
+    assert (cam.width, cam.height) == (16, 16)
+    # Iteration works for training loops.
+    assert sum(1 for _ in ds.images) == 2

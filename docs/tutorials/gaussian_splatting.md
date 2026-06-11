@@ -84,6 +84,39 @@ model.save_ply("point_cloud.ply")                # standard 3DGS checkpoint
   high-gradient large ones split, transparent/oversized ones pruned,
 - periodic opacity resets and progressive SH degree growth.
 
+## Low-memory training (8-16 GB Macs)
+
+Three independent knobs keep training inside a small unified-memory budget:
+
+```bash
+python examples/train_gaussian_splatting.py --data /path/to/scene \
+    --iters 7000 --downscale 2 --low-mem
+```
+
+`--low-mem` bundles:
+
+- **`--image-cache uint8`** — training views are held as uint8 instead of
+  float32 (4x less; ~0.4 GB instead of 1.6 GB for the *truck* scene at
+  half resolution). Use `--image-cache disk` to keep only file paths and
+  decode per step (near-zero resident memory, ~10-30 ms/view decode).
+- **`--max-gaussians 1200000`** — adaptive density control stops cloning
+  and splitting at the cap (pruning continues), bounding model + optimizer
+  memory.
+- **`TrainerConfig(low_memory=True)`** — caps MLX's buffer cache
+  (`mx.set_cache_limit`) and clears it after each densification, which is
+  when shape churn would otherwise grow the cache by gigabytes.
+
+The same options exist in the API:
+
+```python
+ds = load_colmap("scene/", downscale=2, cache="uint8")
+config = TrainerConfig(max_gaussians=1_200_000, low_memory=True)
+```
+
+As a rule of thumb, a 16 GB machine handles COLMAP scenes comfortably at
+`--downscale 2 --low-mem`; on 8 GB add `--downscale 4` and a lower
+`--max-gaussians`.
+
 ## Blender-synthetic scenes
 
 No SfM points? Initialize randomly:
