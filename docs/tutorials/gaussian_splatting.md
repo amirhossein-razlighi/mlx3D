@@ -93,6 +93,15 @@ python examples/train_gaussian_splatting.py \
     --data nerf_synthetic/lego --format blender --iters 7000
 ```
 
+## Inspecting the result
+
+Open any checkpoint in the [interactive viewer](../viewer.md) — orbit, pan
+and zoom in the browser, rendered live by the Metal kernels:
+
+```bash
+mlx3d-view outputs/gs/point_cloud.ply
+```
+
 ## Checkpoints
 
 `save_ply` / `GaussianModel.load_ply` use the standard 3DGS PLY layout

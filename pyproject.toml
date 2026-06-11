@@ -41,6 +41,9 @@ dev = [
   "mkdocstrings[python]>=0.24",
 ]
 
+[project.scripts]
+mlx3d-view = "mlx3d.viewer.__main__:main"
+
 [project.urls]
 Homepage = "https://github.com/amirhossein-razlighi/mlx3D"
 Documentation = "https://amirhossein-razlighi.github.io/mlx3D/"

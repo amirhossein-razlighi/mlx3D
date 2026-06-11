@@ -14,6 +14,7 @@ from . import (
     structures,
     transforms,
     utils,
+    viewer,
 )
 
 __all__ = [
@@ -29,4 +30,5 @@ __all__ = [
     "structures",
     "transforms",
     "utils",
+    "viewer",
 ]
