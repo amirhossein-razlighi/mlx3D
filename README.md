@@ -53,12 +53,14 @@ More in the docs: [mesh optimization](https://amirhossein-razlighi.github.io/mlx
 
 ## Development
 
+Development uses [uv](https://docs.astral.sh/uv/):
+
 ```bash
 git clone https://github.com/amirhossein-razlighi/mlx3D
 cd mlx3D
-pip install -e ".[dev]"
-pytest tests/
-mkdocs serve   # docs at http://127.0.0.1:8000
+uv sync               # creates .venv with all dev dependencies
+uv run pytest tests/
+uv run mkdocs serve   # docs at http://127.0.0.1:8000
 ```
 
 Contributions are welcome — file an issue to get started.

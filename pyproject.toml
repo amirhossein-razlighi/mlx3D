@@ -33,7 +33,7 @@ dependencies = [
   "pillow>=10.0",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
   "pytest>=8.0",
   "ruff>=0.5",

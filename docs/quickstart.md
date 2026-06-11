@@ -6,13 +6,13 @@
 pip install mlx3d
 ```
 
-For development:
+For development (with [uv](https://docs.astral.sh/uv/)):
 
 ```bash
 git clone https://github.com/amirhossein-razlighi/mlx3D
 cd mlx3D
-pip install -e . pytest
-pytest tests/
+uv sync              # creates .venv with all dev dependencies
+uv run pytest tests/
 ```
 
 ## Meshes and point clouds

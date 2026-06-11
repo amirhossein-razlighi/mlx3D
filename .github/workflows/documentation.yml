@@ -17,15 +17,14 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.11"
+          enable-cache: true
       - name: Install dependencies
-        run: |
-          pip install -e .
-          pip install mkdocs-material "mkdocstrings[python]"
+        run: uv sync
       - name: Build docs
-        run: mkdocs build --strict
+        run: uv run mkdocs build --strict
       - name: Deploy to GitHub Pages
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        run: mkdocs gh-deploy --force
+        run: uv run mkdocs gh-deploy --force
