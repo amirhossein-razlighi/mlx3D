@@ -58,6 +58,20 @@ reconstruction plus an `images/` folder):
 python examples/train_gaussian_splatting.py --data /path/to/scene --iters 7000
 ```
 
+To watch training as it happens, start the live viewer from the same command:
+
+```bash
+python examples/train_gaussian_splatting.py --data /path/to/scene \
+    --iters 7000 --downscale 4 --viewer
+```
+
+The viewer opens a local browser page and polls lightweight metadata while
+requesting rendered JPEG frames only when the view changes. Training publishes a
+fresh evaluated Gaussian snapshot every `--viewer-update-every` iterations
+(default: 25), so the preview does not copy the whole model to CPU or refresh
+on every optimizer step. Use `--viewer-no-browser` on remote shells and
+`--viewer-keep-open` if you want the viewer to remain active after training.
+
 What the script does, in code:
 
 ```python
@@ -77,7 +91,9 @@ model.save_ply("point_cloud.ply")                # standard 3DGS checkpoint
 
 `GaussianTrainer` implements the paper's recipe:
 
-- per-parameter Adam learning rates (positions scaled by scene extent),
+- per-parameter Adam learning rates (positions scaled by scene extent and
+  exponentially decayed from `--position-lr-final` over
+  `--position-lr-max-steps`),
 - loss \( (1-\lambda)\,L_1 + \lambda\,(1 - \text{SSIM}) \) with \( \lambda = 0.2 \),
 - **adaptive density control** — screen-space positional gradients are
   accumulated per Gaussian; high-gradient small Gaussians are cloned,
@@ -117,6 +133,19 @@ As a rule of thumb, a 16 GB machine handles COLMAP scenes comfortably at
 `--downscale 2 --low-mem`; on 8 GB add `--downscale 4` and a lower
 `--max-gaussians`.
 
+COLMAP point clouds can contain sparse outliers. MLX3D caps the initial
+nearest-neighbor Gaussian scale to `0.01 * scene_extent` by default
+(`--init-scale-max-frac 0.01`), which avoids full-screen opaque splats during
+the first iterations. Pass `--init-scale-max-frac 0` to disable the cap when
+comparing against older behavior.
+
+For quick timing and memory checks, use the benchmark helper:
+
+```bash
+python examples/benchmark_gaussian_splatting.py --data /path/to/scene \
+    --downscale 4 --steps 20 --save-render /tmp/mlx3d_bench.png
+```
+
 ## Blender-synthetic scenes
 
 No SfM points? Initialize randomly:
@@ -145,5 +174,4 @@ and you can fine-tune checkpoints trained elsewhere.
 !!! note "Current limitations"
     - Densification rebuilds optimizer state (the reference implementation
       preserves Adam moments through clone/split).
-    - One camera per `step` call; no per-step learning-rate schedule yet
-      (the paper decays the position LR exponentially).
+    - One camera per `step` call.

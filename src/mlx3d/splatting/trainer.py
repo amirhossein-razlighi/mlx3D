@@ -25,6 +25,8 @@ __all__ = ["TrainerConfig", "GaussianTrainer"]
 @dataclass
 class TrainerConfig:
     lr_means: float = 1.6e-4
+    lr_means_final: float = 1.6e-6
+    lr_means_max_steps: int = 30_000
     lr_scales: float = 5e-3
     lr_quats: float = 1e-3
     lr_opacities: float = 5e-2
@@ -68,8 +70,25 @@ class GaussianTrainer:
 
     def _build_optimizers(self) -> None:
         c = self.config
+        lr_means = c.lr_means * self.scene_extent
+        lr_means_final = c.lr_means_final * self.scene_extent
+        lr_means_max_steps = int(c.lr_means_max_steps)
+        if lr_means_max_steps > 0 and lr_means > 0 and lr_means_final > 0:
+            means_lr = optim.exponential_decay(
+                lr_means,
+                (lr_means_final / lr_means) ** (1.0 / lr_means_max_steps),
+            )
+            if self.step_count:
+                offset = self.step_count
+
+                def means_lr_with_offset(step, schedule=means_lr, offset=offset):
+                    return schedule(step + offset)
+
+                means_lr = means_lr_with_offset
+        else:
+            means_lr = lr_means
         lrs = {
-            "means": c.lr_means * self.scene_extent,
+            "means": means_lr,
             "scales": c.lr_scales,
             "quats": c.lr_quats,
             "opacities": c.lr_opacities,
@@ -77,6 +96,10 @@ class GaussianTrainer:
             "sh_rest": c.lr_sh_rest,
         }
         self.optimizers = {k: optim.Adam(learning_rate=lr, eps=1e-15) for k, lr in lrs.items()}
+
+    def learning_rates(self) -> dict[str, float]:
+        """Current per-parameter Adam learning rates."""
+        return {k: float(opt.learning_rate) for k, opt in self.optimizers.items()}
 
     def _reset_grad_accum(self) -> None:
         n = self.model.num_gaussians
@@ -179,7 +202,6 @@ class GaussianTrainer:
 
         if self.step_count % cfg.opacity_reset_every == 0 and self.step_count <= cfg.densify_until:
             self.model.reset_opacities()
-            self._build_optimizers()
             opacity_reset = True
 
         if self.step_count % cfg.sh_increase_every == 0:
@@ -191,6 +213,7 @@ class GaussianTrainer:
             "num_gaussians": self.model.num_gaussians,
             "step": self.step_count,
             "active_sh_degree": self.model.active_sh_degree,
+            "lr_means": self.learning_rates()["means"],
             "densify": densify_stats,
             "opacity_reset": opacity_reset,
             "sh_degree_changed": sh_degree_changed,

@@ -46,8 +46,10 @@ def project_gaussians(
             - ``radii`` (N,): conservative pixel radii (0 for culled Gaussians).
     """
     R, t = camera.R, camera.t
-    p_cam = means @ R.T + t  # (N, 3)
-    x, y, z = p_cam[:, 0], p_cam[:, 1], p_cam[:, 2]
+    mx_, my_, mz_ = means[:, 0], means[:, 1], means[:, 2]
+    x = mx_ * R[0, 0] + my_ * R[0, 1] + mz_ * R[0, 2] + t[0]
+    y = mx_ * R[1, 0] + my_ * R[1, 1] + mz_ * R[1, 2] + t[1]
+    z = mx_ * R[2, 0] + my_ * R[2, 1] + mz_ * R[2, 2] + t[2]
     z_safe = mx.maximum(z, 1e-6)
 
     # Project centers.
@@ -62,23 +64,49 @@ def project_gaussians(
     tx = mx.clip(x / z_safe, -1.3 * tan_fov_x, 1.3 * tan_fov_x) * z_safe
     ty = mx.clip(y / z_safe, -1.3 * tan_fov_y, 1.3 * tan_fov_y) * z_safe
 
-    zero = mx.zeros_like(z_safe)
     inv_z = 1.0 / z_safe
     inv_z2 = inv_z * inv_z
-    J = mx.stack(
-        [
-            mx.stack([camera.fx * inv_z, zero, -camera.fx * tx * inv_z2], axis=-1),
-            mx.stack([zero, camera.fy * inv_z, -camera.fy * ty * inv_z2], axis=-1),
-        ],
-        axis=-2,
-    )  # (N, 2, 3)
 
-    cov3d = quat_scale_to_cov3d(quats, scales)
-    T = J @ R  # (N, 2, 3)
-    cov2d = T @ cov3d @ T.swapaxes(-1, -2)  # (N, 2, 2)
-    a = cov2d[:, 0, 0] + blur
-    b = cov2d[:, 0, 1]
-    c = cov2d[:, 1, 1] + blur
+    # Project the rotated/scaled covariance without materializing per-Gaussian
+    # 3x3 and 2x3 matrices. Let T = J @ camera.R and M = R_quat @ diag(scales).
+    # The screen covariance is (T @ M) @ (T @ M)^T, so only six scalar dot
+    # products are needed per Gaussian.
+    j00 = camera.fx * inv_z
+    j02 = -camera.fx * tx * inv_z2
+    j11 = camera.fy * inv_z
+    j12 = -camera.fy * ty * inv_z2
+
+    t00 = j00 * R[0, 0] + j02 * R[2, 0]
+    t01 = j00 * R[0, 1] + j02 * R[2, 1]
+    t02 = j00 * R[0, 2] + j02 * R[2, 2]
+    t10 = j11 * R[1, 0] + j12 * R[2, 0]
+    t11 = j11 * R[1, 1] + j12 * R[2, 1]
+    t12 = j11 * R[1, 2] + j12 * R[2, 2]
+
+    q = quats / mx.linalg.norm(quats, axis=-1, keepdims=True)
+    qw, qx, qy, qz = q[:, 0], q[:, 1], q[:, 2], q[:, 3]
+    two = 2.0
+    r00 = 1.0 - two * (qy * qy + qz * qz)
+    r01 = two * (qx * qy - qw * qz)
+    r02 = two * (qx * qz + qw * qy)
+    r10 = two * (qx * qy + qw * qz)
+    r11 = 1.0 - two * (qx * qx + qz * qz)
+    r12 = two * (qy * qz - qw * qx)
+    r20 = two * (qx * qz - qw * qy)
+    r21 = two * (qy * qz + qw * qx)
+    r22 = 1.0 - two * (qx * qx + qy * qy)
+
+    sx, sy, sz = scales[:, 0], scales[:, 1], scales[:, 2]
+    m00 = (t00 * r00 + t01 * r10 + t02 * r20) * sx
+    m01 = (t00 * r01 + t01 * r11 + t02 * r21) * sy
+    m02 = (t00 * r02 + t01 * r12 + t02 * r22) * sz
+    m10 = (t10 * r00 + t11 * r10 + t12 * r20) * sx
+    m11 = (t10 * r01 + t11 * r11 + t12 * r21) * sy
+    m12 = (t10 * r02 + t11 * r12 + t12 * r22) * sz
+
+    a = m00 * m00 + m01 * m01 + m02 * m02 + blur
+    b = m00 * m10 + m01 * m11 + m02 * m12
+    c = m10 * m10 + m11 * m11 + m12 * m12 + blur
 
     det = a * c - b * b
     det_safe = mx.maximum(det, 1e-12)

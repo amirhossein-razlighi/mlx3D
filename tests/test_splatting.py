@@ -16,6 +16,7 @@ from mlx3d.splatting import (
     rgb_to_sh,
     sh_to_rgb,
 )
+from mlx3d.transforms import quaternion_to_matrix
 
 
 def assert_close(a, b, atol=1e-5):
@@ -65,6 +66,59 @@ def test_projection_culls_behind_camera():
         cam, mx.array([[0.0, 0.0, -10.0]]), mx.array([[1.0, 0, 0, 0]]), mx.full((1, 3), 0.1)
     )
     assert float(proj["radii"][0]) == 0.0
+
+
+def test_projection_matches_matrix_formula():
+    mx.random.seed(11)
+    cam = Camera.look_at(eye=(0.3, -0.2, -3.0), at=(0, 0, 0), width=80, height=48, fov=55.0)
+    means = mx.random.normal((32, 3)) * 0.4
+    quats = mx.random.normal((32, 4))
+    scales = mx.exp(mx.random.normal((32, 3)) * 0.2 - 2.0)
+
+    out = project_gaussians(cam, means, quats, scales)
+
+    R, t = cam.R, cam.t
+    p_cam = means @ R.T + t
+    x, y, z = p_cam[:, 0], p_cam[:, 1], p_cam[:, 2]
+    z_safe = mx.maximum(z, 1e-6)
+    u = cam.fx * x / z_safe + cam.cx
+    v = cam.fy * y / z_safe + cam.cy
+    means2d = mx.stack([u, v], axis=-1)
+
+    tan_fov_x = 0.5 * cam.width / cam.fx
+    tan_fov_y = 0.5 * cam.height / cam.fy
+    tx = mx.clip(x / z_safe, -1.3 * tan_fov_x, 1.3 * tan_fov_x) * z_safe
+    ty = mx.clip(y / z_safe, -1.3 * tan_fov_y, 1.3 * tan_fov_y) * z_safe
+    zero = mx.zeros_like(z_safe)
+    inv_z = 1.0 / z_safe
+    inv_z2 = inv_z * inv_z
+    J = mx.stack(
+        [
+            mx.stack([cam.fx * inv_z, zero, -cam.fx * tx * inv_z2], axis=-1),
+            mx.stack([zero, cam.fy * inv_z, -cam.fy * ty * inv_z2], axis=-1),
+        ],
+        axis=-2,
+    )
+    qR = quaternion_to_matrix(quats)
+    M = qR * scales[:, None, :]
+    cov3d = M @ M.swapaxes(-1, -2)
+    T = J @ R
+    cov2d = T @ cov3d @ T.swapaxes(-1, -2)
+    a = cov2d[:, 0, 0] + 0.3
+    b = cov2d[:, 0, 1]
+    c = cov2d[:, 1, 1] + 0.3
+    det = a * c - b * b
+    det_safe = mx.maximum(det, 1e-12)
+    conics = mx.stack([c / det_safe, -b / det_safe, a / det_safe], axis=-1)
+    mid = 0.5 * (a + c)
+    lam1 = mid + mx.sqrt(mx.maximum(mid * mid - det, 0.01))
+    radii = mx.ceil(3.0 * mx.sqrt(mx.maximum(lam1, 0.0)))
+    radii = mx.where((z > cam.znear) & (det > 0), radii, mx.zeros_like(radii))
+
+    assert_close(out["means2d"], means2d, atol=1e-5)
+    assert_close(out["conics"], conics, atol=1e-4)
+    assert_close(out["depths"], z, atol=1e-5)
+    assert_close(out["radii"], radii, atol=0)
 
 
 def test_binning_covers_visible_gaussians(random_scene):
@@ -142,6 +196,24 @@ def test_model_from_points_and_render():
     assert float(out["alpha"].max()) > 0.01
 
 
+def test_model_from_points_caps_initial_scale():
+    pts = mx.array(
+        [
+            [0.0, 0.0, 0.0],
+            [100.0, 0.0, 0.0],
+            [0.0, 100.0, 0.0],
+            [0.0, 0.0, 100.0],
+        ]
+    )
+    model = GaussianModel.from_points(
+        pts,
+        sh_degree=0,
+        scale_init_max_scale=0.25,
+    )
+    mx.eval(model.params["scales"])
+    assert float(mx.exp(model.params["scales"]).max()) <= 0.250001
+
+
 def test_model_ply_roundtrip(tmp_path):
     pts = mx.random.normal((20, 3))
     model = GaussianModel.from_points(pts, sh_degree=2)
@@ -189,6 +261,39 @@ def test_trainer_converges_single_view():
     trainer = GaussianTrainer(model, config)
     losses = [trainer.step(cam, target)["loss"] for _ in range(60)]
     assert losses[-1] < losses[0] * 0.6, f"no convergence: {losses[0]:.4f} -> {losses[-1]:.4f}"
+
+
+def test_trainer_position_lr_decays():
+    mx.random.seed(7)
+    cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), width=24, height=24, fov=60.0)
+    target = mx.random.uniform(shape=(24, 24, 3))
+    model = GaussianModel.from_points(
+        mx.random.normal((20, 3)) * 0.3,
+        mx.random.uniform(shape=(20, 3)),
+        sh_degree=0,
+    )
+    trainer = GaussianTrainer(
+        model,
+        TrainerConfig(
+            lr_means=1e-2,
+            lr_means_final=1e-4,
+            lr_means_max_steps=2,
+            densify_from=10_000,
+            sh_increase_every=10_000,
+        ),
+        scene_extent=2.0,
+    )
+
+    lr0 = trainer.learning_rates()["means"]
+    info1 = trainer.step(cam, target)
+    info2 = trainer.step(cam, target)
+    info3 = trainer.step(cam, target)
+
+    assert abs(lr0 - 2e-2) < 1e-6
+    assert abs(info1["lr_means"] - lr0) < 1e-8
+    assert info2["lr_means"] < info1["lr_means"]
+    assert info3["lr_means"] < info2["lr_means"]
+    assert abs(info3["lr_means"] - 2e-4) < 1e-7
 
 
 def test_trainer_densification_runs():

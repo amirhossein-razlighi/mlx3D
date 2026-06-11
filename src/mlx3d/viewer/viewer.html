@@ -54,6 +54,7 @@ const home = { theta: 0.6, phi: 0.3, radius: 4.0, target: [0, 0, 0], fov: 60 };
 let cam = null;
 let upSign = 1, resScale = 1.0, maxScale = 1.0, dirty = true, info = {};
 let lastFrameMs = 0, shownW = 0, shownH = 0;
+let lastRevision = null, infoPoll = null;
 
 function resetCamera() {
   cam = { theta: home.theta, phi: home.phi, radius: home.radius,
@@ -62,14 +63,31 @@ function resetCamera() {
 }
 resetCamera();
 
-fetch("/info").then(r => r.json()).then(meta => {
+function applyInfo(meta, initial = false) {
+  const prevRevision = info.revision;
   info = meta;
-  if (meta.radius) home.radius = meta.radius;
-  if (meta.target) home.target = meta.target;
-  if (meta.fov) home.fov = meta.fov;
-  if (meta.heavy) maxScale = 0.5;   // NeRF: render at half resolution by default
-  resetCamera();
-});
+  if (initial) {
+    if (meta.radius) home.radius = meta.radius;
+    if (meta.target) home.target = meta.target;
+    if (meta.fov) home.fov = meta.fov;
+    resetCamera();
+  }
+  if (initial && meta.heavy) maxScale = 0.5;   // NeRF: render at half resolution by default
+  if (initial && meta.max_scale) maxScale = Math.max(0.1, Math.min(1.0, Number(meta.max_scale)));
+  if (!initial && meta.revision !== undefined && meta.revision !== prevRevision) dirty = true;
+  updateStats();
+}
+
+async function fetchInfo(initial = false) {
+  const meta = await fetch("/info").then(r => r.json());
+  applyInfo(meta, initial);
+  if (initial && meta.live && !infoPoll) {
+    const ms = Math.max(200, Number(meta.poll_info_ms || 750));
+    infoPoll = setInterval(() => fetchInfo(false).catch(() => {}), ms);
+  }
+}
+
+fetchInfo(true).catch(() => {});
 
 // camera basis for panning (matches the server's spherical convention)
 function basis() {
@@ -200,7 +218,12 @@ async function frameLoop() {
 function updateStats() {
   const fps = lastFrameMs > 0 ? (1000 / lastFrameMs).toFixed(1) : "—";
   const parts = [`${fps} fps`, `${shownW}×${shownH}`];
+  if (info.step !== undefined) parts.push(`iter ${info.step.toLocaleString()}`);
+  if (info.loss !== undefined) parts.push(`loss ${Number(info.loss).toFixed(4)}`);
+  if (info.lr_means !== undefined) parts.push(`lr ${Number(info.lr_means).toExponential(1)}`);
   if (info.gaussians) parts.push(`${info.gaussians.toLocaleString()} gaussians`);
+  if (info.sh_degree !== undefined) parts.push(`SH ${info.sh_degree}`);
+  if (info.status) parts.push(info.status);
   if (info.mode) parts.push(info.mode);
   statline.textContent = parts.join("  ·  ");
 }
