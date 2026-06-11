@@ -18,6 +18,7 @@ import io
 import json
 import math
 import threading
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
@@ -29,7 +30,7 @@ import numpy as np
 
 from ..cameras import Camera
 
-__all__ = ["Viewer", "view_gaussians", "view_nerf"]
+__all__ = ["LiveGaussianViewer", "Viewer", "view_gaussians", "view_live_gaussians", "view_nerf"]
 
 RenderFn = Callable[[Camera], mx.array]
 
@@ -65,7 +66,16 @@ class Viewer:
             "fov": fov,
             **(info or {}),
         }
+        self._info_lock = threading.Lock()
         self._lock = threading.Lock()  # one render at a time on the GPU
+
+    def get_info(self) -> dict:
+        with self._info_lock:
+            return dict(self.info)
+
+    def update_info(self, **info) -> None:
+        with self._info_lock:
+            self.info.update(info)
 
     # ------------------------------------------------------------------ camera
     @staticmethod
@@ -131,7 +141,7 @@ class Viewer:
                     if url.path == "/":
                         self._send(200, "text/html; charset=utf-8", page.encode())
                     elif url.path == "/info":
-                        self._send(200, "application/json", json.dumps(viewer.info).encode())
+                        self._send(200, "application/json", json.dumps(viewer.get_info()).encode())
                     elif url.path == "/render":
                         q = parse_qs(url.query)
                         quality = int(float(q.get("q", [85])[0]))
@@ -155,6 +165,138 @@ class Viewer:
             print("\nViewer stopped.")
         finally:
             server.server_close()
+
+
+class LiveGaussianViewer:
+    """Live viewer adapter for a Gaussian model that changes during training.
+
+    The training thread calls :meth:`publish` at a controlled cadence. Each
+    publish stores references to already-evaluated MLX arrays, so render
+    requests never read a half-mutated training model and no CPU copies are
+    made just to refresh the preview.
+    """
+
+    def __init__(
+        self,
+        model,
+        background: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        max_scale: float = 0.5,
+        poll_ms: int = 750,
+        initial_radius: float | None = None,
+        initial_target: tuple[float, float, float] | None = None,
+    ):
+        from ..splatting import GaussianModel
+
+        self._model_cls = GaussianModel
+        self._lock = threading.Lock()
+        self._background = mx.array(background)
+        self._params: dict[str, mx.array] = {}
+        self._sh_degree = model.sh_degree
+        self._active_sh_degree = model.active_sh_degree
+        self._revision = -1
+        self.publish(model, step=0, loss=None)
+
+        if initial_radius is None or initial_target is None:
+            means = np.array(self._params["means"])
+            center = means.mean(axis=0)
+            radius = (
+                float(np.percentile(np.linalg.norm(means - center, axis=1), 90)) * 2.5 + 1e-3
+            )
+        else:
+            center = np.array(initial_target, dtype=np.float32)
+            radius = float(initial_radius)
+        self.viewer = Viewer(
+            self._render,
+            info={
+                "mode": "live gaussian splatting",
+                "live": True,
+                "max_scale": float(max_scale),
+                "poll_info_ms": int(poll_ms),
+                "status": "training",
+            },
+            initial_radius=radius,
+            initial_target=tuple(float(c) for c in center),
+        )
+        self.viewer.update_info(
+            revision=self._revision,
+            gaussians=model.num_gaussians,
+            sh_degree=model.active_sh_degree,
+        )
+
+    def publish(
+        self,
+        model,
+        step: int | None = None,
+        loss: float | None = None,
+        lr_means: float | None = None,
+    ) -> None:
+        params = dict(model.params)
+        mx.eval(params, self._background)
+        with self._lock:
+            self._params = params
+            self._sh_degree = model.sh_degree
+            self._active_sh_degree = model.active_sh_degree
+            self._revision += 1
+            revision = self._revision
+        info = {
+            "revision": revision,
+            "gaussians": model.num_gaussians,
+            "sh_degree": model.active_sh_degree,
+            "updated_at": time.time(),
+        }
+        if step is not None:
+            info["step"] = int(step)
+        if loss is not None:
+            info["loss"] = float(loss)
+        if lr_means is not None:
+            info["lr_means"] = float(lr_means)
+        if hasattr(self, "viewer"):
+            self.viewer.update_info(**info)
+
+    def mark_done(self) -> None:
+        self.viewer.update_info(status="done")
+
+    def _render(self, camera: Camera) -> mx.array:
+        with self._lock:
+            params = dict(self._params)
+            sh_degree = self._sh_degree
+            active_sh_degree = self._active_sh_degree
+        model = self._model_cls(params, sh_degree=sh_degree)
+        model.active_sh_degree = active_sh_degree
+        return model.render(camera, background=self._background)["image"]
+
+    def serve(self, host: str = "127.0.0.1", port: int = 8090, open_browser: bool = True):
+        self.viewer.serve(host=host, port=port, open_browser=open_browser)
+
+
+def view_live_gaussians(
+    model,
+    background: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    host: str = "127.0.0.1",
+    port: int = 8090,
+    open_browser: bool = True,
+    serve: bool = True,
+    max_scale: float = 0.5,
+    poll_ms: int = 750,
+    initial_radius: float | None = None,
+    initial_target: tuple[float, float, float] | None = None,
+) -> LiveGaussianViewer:
+    """Open a live viewer for a Gaussian model being updated by training.
+
+    Returns a :class:`LiveGaussianViewer`; call ``publish(model, step, loss)``
+    whenever a fresh preview should be visible in the browser.
+    """
+    live = LiveGaussianViewer(
+        model,
+        background=background,
+        max_scale=max_scale,
+        poll_ms=poll_ms,
+        initial_radius=initial_radius,
+        initial_target=initial_target,
+    )
+    if serve:
+        live.serve(host=host, port=port, open_browser=open_browser)
+    return live
 
 
 def view_gaussians(

@@ -1,3 +1,3 @@
-from .server import Viewer, view_gaussians, view_nerf
+from .server import LiveGaussianViewer, Viewer, view_gaussians, view_live_gaussians, view_nerf
 
-__all__ = ["Viewer", "view_gaussians", "view_nerf"]
+__all__ = ["LiveGaussianViewer", "Viewer", "view_gaussians", "view_live_gaussians", "view_nerf"]

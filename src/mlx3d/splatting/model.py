@@ -40,6 +40,7 @@ class GaussianModel:
         initial_opacity: float = 0.1,
         scale_init_max_ref: int = 10_000,
         scale_init_chunk_size: int = 1024,
+        scale_init_max_scale: float | None = None,
     ) -> "GaussianModel":
         """Initialize from a point cloud (e.g. SfM points).
 
@@ -52,6 +53,10 @@ class GaussianModel:
                 spend seconds to minutes materializing huge distance tiles.
             scale_init_chunk_size: Query chunk size for the scale-estimation
                 KNN. Lower values reduce peak memory during initialization.
+            scale_init_max_scale: Optional cap for initial per-axis Gaussian
+                scale. This is useful for COLMAP point clouds with sparse
+                outliers whose nearest-neighbor distances would otherwise
+                create full-screen splats.
         """
         from ..ops import knn_points
 
@@ -80,6 +85,9 @@ class GaussianModel:
             nearest = mx.where(self_hit[:, None], d[:, 1:k], d[:, : k - 1])
             mean_sq = mx.maximum(nearest.mean(axis=-1), 1e-8)
         scales = mx.log(mx.sqrt(mean_sq))[:, None] * mx.ones((1, 3))
+        if scale_init_max_scale is not None:
+            max_log_scale = float(np.log(max(scale_init_max_scale, 1e-8)))
+            scales = mx.minimum(scales, mx.full(scales.shape, max_log_scale))
 
         quats = mx.zeros((N, 4))
         quats = quats.at[:, 0].add(mx.ones((N,)))

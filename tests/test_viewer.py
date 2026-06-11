@@ -10,7 +10,7 @@ import numpy as np
 
 from mlx3d.cameras import Camera
 from mlx3d.splatting import GaussianModel
-from mlx3d.viewer import Viewer, view_gaussians
+from mlx3d.viewer import Viewer, view_gaussians, view_live_gaussians
 
 
 def test_camera_from_query_orbit():
@@ -40,6 +40,38 @@ def test_render_jpeg_bytes():
     data = viewer.render_jpeg(cam)
     assert data[:2] == b"\xff\xd8"  # JPEG magic
     assert len(data) > 500
+
+
+def test_live_gaussian_viewer_publish():
+    model = GaussianModel.from_points(mx.random.normal((50, 3)) * 0.3, sh_degree=0)
+    live = view_live_gaussians(
+        model,
+        serve=False,
+        max_scale=0.25,
+        poll_ms=250,
+        initial_radius=2.5,
+        initial_target=(1.0, 2.0, 3.0),
+    )
+    info0 = live.viewer.get_info()
+
+    model.params["means"] = model.params["means"] + 0.01
+    mx.eval(model.params)
+    live.publish(model, step=7, loss=0.1234, lr_means=1.2e-4)
+    info = live.viewer.get_info()
+
+    assert info["live"] is True
+    assert info["max_scale"] == 0.25
+    assert info["poll_info_ms"] == 250
+    assert info["radius"] == 2.5
+    assert info["target"] == [1.0, 2.0, 3.0]
+    assert info["revision"] > info0["revision"]
+    assert info["step"] == 7
+    assert abs(info["loss"] - 0.1234) < 1e-6
+    assert abs(info["lr_means"] - 1.2e-4) < 1e-8
+
+    cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), width=64, height=48)
+    data = live.viewer.render_jpeg(cam)
+    assert data[:2] == b"\xff\xd8"
 
 
 def _serve_in_background(viewer) -> str:
@@ -86,3 +118,18 @@ def test_http_endpoints():
     except urllib.error.HTTPError as e:
         raised = e.code == 404
     assert raised
+
+
+def test_live_http_info_updates():
+    model = GaussianModel.from_points(mx.random.normal((50, 3)) * 0.3, sh_degree=0)
+    live = view_live_gaussians(model, serve=False)
+    base = _serve_in_background(live.viewer)
+
+    info0 = json.loads(urllib.request.urlopen(base + "/info", timeout=5).read())
+    live.publish(model, step=11, loss=0.25)
+    info = json.loads(urllib.request.urlopen(base + "/info", timeout=5).read())
+
+    assert info["live"] is True
+    assert info["revision"] > info0["revision"]
+    assert info["step"] == 11
+    assert info["loss"] == 0.25

@@ -15,6 +15,7 @@ periodic renders.
 
 import argparse
 import os
+import threading
 import time
 
 import mlx.core as mx
@@ -61,9 +62,19 @@ def _format_train_info(it: int, total: int, info: dict[str, object], elapsed: fl
     msg = (
         f"iter {it:6d}/{total}  loss {float(info['loss']):.5f}  "
         f"gaussians {int(info['num_gaussians'])}  "
-        f"sh {int(info['active_sh_degree'])}  {rate:.2f} it/s"
+        f"sh {int(info['active_sh_degree'])}  "
+        f"lr_xyz {float(info['lr_means']):.2e}  {rate:.2f} it/s"
     )
     return f"{msg}  {mem}" if mem else msg
+
+
+def _viewer_initial_frame(ds, scene_extent: float) -> tuple[float, tuple[float, float, float]]:
+    cameras = getattr(ds, "cameras", None)
+    if not cameras:
+        return scene_extent, (0.0, 0.0, 0.0)
+    centers = np.stack([np.array(c.camera_center) for c in cameras])
+    target = tuple(float(v) for v in centers.mean(axis=0))
+    return max(scene_extent, 1e-3), target
 
 
 def main() -> None:
@@ -89,6 +100,13 @@ def main() -> None:
     parser.add_argument("--scale-init-chunk-size", type=int, default=None,
                         help="query chunk size for initial scale KNN "
                              "(default: 1024; fallback path only)")
+    parser.add_argument("--init-scale-max-frac", type=float, default=0.01,
+                        help="cap initial Gaussian scale as this fraction of scene extent; "
+                             "<=0 disables the cap")
+    parser.add_argument("--position-lr-final", type=float, default=1.6e-6,
+                        help="final unscaled xyz learning rate for exponential decay")
+    parser.add_argument("--position-lr-max-steps", type=int, default=30_000,
+                        help="steps over which xyz learning rate decays")
     parser.add_argument("--cache-limit-gb", type=float, default=2.0,
                         help="MLX buffer-cache cap used with --low-mem")
     parser.add_argument("--log-every", type=int, default=10,
@@ -97,6 +115,20 @@ def main() -> None:
                         help="save render/checkpoint frequency; <=0 disables periodic saves")
     parser.add_argument("--no-progress", action="store_true",
                         help="disable tqdm progress bar even when tqdm is installed")
+    parser.add_argument("--viewer", action="store_true",
+                        help="start a live browser viewer while training")
+    parser.add_argument("--viewer-host", type=str, default="127.0.0.1")
+    parser.add_argument("--viewer-port", type=int, default=8090)
+    parser.add_argument("--viewer-no-browser", action="store_true",
+                        help="start the live viewer without opening a browser")
+    parser.add_argument("--viewer-update-every", type=int, default=25,
+                        help="publish a fresh live-viewer snapshot every N steps")
+    parser.add_argument("--viewer-max-scale", type=float, default=0.5,
+                        help="max browser render scale for live preview")
+    parser.add_argument("--viewer-poll-ms", type=int, default=750,
+                        help="browser metadata polling interval for live preview")
+    parser.add_argument("--viewer-keep-open", action="store_true",
+                        help="keep the process alive after training so the viewer stays open")
     args = parser.parse_args()
 
     image_cache = args.image_cache or ("uint8" if args.low_mem else "ram")
@@ -104,6 +136,7 @@ def main() -> None:
     scale_init_max_ref = args.scale_init_max_ref or 10_000
     scale_init_chunk_size = args.scale_init_chunk_size or 1024
     log_every = max(1, args.log_every)
+    viewer_update_every = max(1, args.viewer_update_every)
 
     print("Loading dataset...", flush=True)
     t0 = time.perf_counter()
@@ -124,6 +157,10 @@ def main() -> None:
         scene_extent = 3.0
         white_bg = True
 
+    scale_init_max_scale = (
+        None if args.init_scale_max_frac <= 0 else args.init_scale_max_frac * scene_extent
+    )
+
     cam0, img0 = ds[0]
     if cam0.width != img0.shape[1] or cam0.height != img0.shape[0]:
         raise RuntimeError(
@@ -142,7 +179,8 @@ def main() -> None:
 
     print(
         "Initializing Gaussian model "
-        f"(scale KNN ref={scale_init_max_ref}, chunk={scale_init_chunk_size})...",
+        f"(scale KNN ref={scale_init_max_ref}, chunk={scale_init_chunk_size}, "
+        f"max_scale={scale_init_max_scale})...",
         flush=True,
     )
     t0 = time.perf_counter()
@@ -152,6 +190,7 @@ def main() -> None:
         sh_degree=args.sh_degree,
         scale_init_max_ref=scale_init_max_ref,
         scale_init_chunk_size=scale_init_chunk_size,
+        scale_init_max_scale=scale_init_max_scale,
     )
     mx.eval(model.params)
     if args.low_mem:
@@ -167,8 +206,44 @@ def main() -> None:
         max_gaussians=max_gaussians,
         low_memory=args.low_mem,
         cache_limit_gb=args.cache_limit_gb,
+        lr_means_final=args.position_lr_final,
+        lr_means_max_steps=args.position_lr_max_steps,
     )
     trainer = GaussianTrainer(model, config, scene_extent=scene_extent)
+    live_viewer = None
+    viewer_thread = None
+    if args.viewer:
+        from mlx3d.viewer import view_live_gaussians
+
+        bg = (1.0, 1.0, 1.0) if white_bg else (0.0, 0.0, 0.0)
+        viewer_radius, viewer_target = _viewer_initial_frame(ds, scene_extent)
+        live_viewer = view_live_gaussians(
+            model,
+            background=bg,
+            serve=False,
+            max_scale=args.viewer_max_scale,
+            poll_ms=args.viewer_poll_ms,
+            initial_radius=viewer_radius,
+            initial_target=viewer_target,
+        )
+
+        def serve_viewer() -> None:
+            try:
+                live_viewer.serve(
+                    host=args.viewer_host,
+                    port=args.viewer_port,
+                    open_browser=not args.viewer_no_browser,
+                )
+            except OSError as e:
+                print(f"Live viewer failed to start: {e}", flush=True)
+
+        viewer_thread = threading.Thread(target=serve_viewer, daemon=True)
+        viewer_thread.start()
+        print(
+            f"Live viewer: http://{args.viewer_host}:{args.viewer_port} "
+            f"(snapshot every {viewer_update_every} iters, max scale {args.viewer_max_scale:.2f})",
+            flush=True,
+        )
 
     os.makedirs(args.out, exist_ok=True)
     order = np.random.permutation(len(ds))
@@ -193,6 +268,7 @@ def main() -> None:
                     loss=f"{float(info['loss']):.5f}",
                     N=int(info["num_gaussians"]),
                     sh=int(info["active_sh_degree"]),
+                    lr=f"{float(info['lr_means']):.1e}",
                 )
         elif it == 1 or it % log_every == 0 or it == args.iters:
             print(_format_train_info(it, args.iters, info, elapsed), flush=True)
@@ -210,6 +286,20 @@ def main() -> None:
         if info["sh_degree_changed"]:
             _write_progress(pbar, f"active SH degree -> {info['active_sh_degree']} at iter {it}")
 
+        if live_viewer is not None and (
+            it == 1
+            or it % viewer_update_every == 0
+            or info["densify"] is not None
+            or info["sh_degree_changed"]
+            or it == args.iters
+        ):
+            live_viewer.publish(
+                model,
+                step=it,
+                loss=float(info["loss"]),
+                lr_means=float(info["lr_means"]),
+            )
+
         should_save = args.save_every > 0 and (it % args.save_every == 0 or it == args.iters)
         if should_save:
             save_view(
@@ -223,7 +313,19 @@ def main() -> None:
 
     if pbar is not None:
         pbar.close()
-    print(f"Done. Checkpoint: {args.out}/point_cloud.ply", flush=True)
+    if live_viewer is not None:
+        live_viewer.mark_done()
+    if args.save_every > 0:
+        print(f"Done. Checkpoint: {args.out}/point_cloud.ply", flush=True)
+    else:
+        print("Done. Checkpoint saving disabled (--save-every <= 0).", flush=True)
+    if viewer_thread is not None and args.viewer_keep_open:
+        print("Training done; live viewer remains open. Press Ctrl-C to stop.", flush=True)
+        try:
+            while viewer_thread.is_alive():
+                time.sleep(1.0)
+        except KeyboardInterrupt:
+            pass
 
 
 def save_view(model, ds, white_bg, path, log=print):
