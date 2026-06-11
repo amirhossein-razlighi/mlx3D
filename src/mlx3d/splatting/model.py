@@ -38,11 +38,20 @@ class GaussianModel:
         colors: mx.array | None = None,
         sh_degree: int = 3,
         initial_opacity: float = 0.1,
+        scale_init_max_ref: int = 10_000,
+        scale_init_chunk_size: int = 1024,
     ) -> "GaussianModel":
         """Initialize from a point cloud (e.g. SfM points).
 
         Scales are set from the mean distance to the 3 nearest neighbors, as
         in the reference implementation.
+
+        Args:
+            scale_init_max_ref: Maximum reference points used for the initial
+                nearest-neighbor scale estimate. Large COLMAP clouds otherwise
+                spend seconds to minutes materializing huge distance tiles.
+            scale_init_chunk_size: Query chunk size for the scale-estimation
+                KNN. Lower values reduce peak memory during initialization.
         """
         from ..ops import knn_points
 
@@ -53,13 +62,23 @@ class GaussianModel:
         # Mean distance to the 3 nearest neighbors. For huge clouds, a random
         # reference subset keeps the O(N * R) search memory bounded without
         # meaningfully changing the scale estimate.
-        max_ref = 50_000
-        if N > max_ref:
-            ref = points[mx.random.permutation(N)[:max_ref]]
+        ref_count = min(N, max(1, int(scale_init_max_ref)))
+        if N > ref_count:
+            ref = points[mx.random.permutation(N)[:ref_count]]
         else:
             ref = points
-        d, _ = knn_points(points, ref, K=4)  # K=4: nearest may be self (dist 0)
-        mean_sq = mx.maximum(d[:, 1:].mean(axis=-1), 1e-8)
+
+        if ref_count <= 1:
+            mean_sq = mx.full((N,), 1e-8)
+        else:
+            k = min(4, ref_count)
+            d, _ = knn_points(points, ref, K=k, chunk_size=scale_init_chunk_size)
+            # If the reference set contains the query point, the first
+            # neighbor is the point itself. Skip that zero-distance hit;
+            # otherwise use the nearest available neighbors directly.
+            self_hit = d[:, 0] <= 1e-12
+            nearest = mx.where(self_hit[:, None], d[:, 1:k], d[:, : k - 1])
+            mean_sq = mx.maximum(nearest.mean(axis=-1), 1e-8)
         scales = mx.log(mx.sqrt(mean_sq))[:, None] * mx.ones((1, 3))
 
         quats = mx.zeros((N, 4))

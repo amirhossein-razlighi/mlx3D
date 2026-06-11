@@ -110,6 +110,15 @@ def _qvec_to_rotmat(q: np.ndarray) -> np.ndarray:
     )
 
 
+def _image_size(path: str) -> tuple[int, int] | None:
+    if not os.path.exists(path):
+        return None
+    from PIL import Image
+
+    with Image.open(path) as img:
+        return img.size
+
+
 def load_colmap(
     root: str,
     images_dir: str = "images",
@@ -152,10 +161,14 @@ def load_colmap(
         else:  # pragma: no cover
             raise ValueError(f"Unsupported camera model {cam['model']}")
 
-        # PIL's resize floors the size; mirror that so intrinsics stay exact
-        # without decoding any image up front.
-        W = cam["width"] // downscale
-        H = cam["height"] // downscale
+        image_path = os.path.join(root, images_dir, meta["name"])
+        file_size = _image_size(image_path)
+        base_w, base_h = file_size or (cam["width"], cam["height"])
+        # Use the actual image files as the training-resolution source of
+        # truth. Some public COLMAP scenes ship pre-resized images while
+        # retaining full-resolution camera metadata.
+        W = max(1, base_w // downscale)
+        H = max(1, base_h // downscale)
         sx = W / cam["width"]
         sy = H / cam["height"]
         R = _qvec_to_rotmat(meta["qvec"])
@@ -170,7 +183,7 @@ def load_colmap(
             )
         )
         if load_images:
-            images.append_file(os.path.join(root, images_dir, meta["name"]))
+            images.append_file(image_path)
         names.append(meta["name"])
 
     return ColmapDataset(
