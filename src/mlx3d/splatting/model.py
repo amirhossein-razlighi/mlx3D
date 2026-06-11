@@ -50,7 +50,15 @@ class GaussianModel:
         if colors is None:
             colors = mx.full((N, 3), 0.5)
 
-        d, _ = knn_points(points, points, K=4)  # includes self at distance 0
+        # Mean distance to the 3 nearest neighbors. For huge clouds, a random
+        # reference subset keeps the O(N * R) search memory bounded without
+        # meaningfully changing the scale estimate.
+        max_ref = 50_000
+        if N > max_ref:
+            ref = points[mx.random.permutation(N)[:max_ref]]
+        else:
+            ref = points
+        d, _ = knn_points(points, ref, K=4)  # K=4: nearest may be self (dist 0)
         mean_sq = mx.maximum(d[:, 1:].mean(axis=-1), 1e-8)
         scales = mx.log(mx.sqrt(mean_sq))[:, None] * mx.ones((1, 3))
 

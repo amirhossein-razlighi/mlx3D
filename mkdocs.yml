@@ -61,6 +61,7 @@ nav:
   - Getting Started:
       - Quickstart: quickstart.md
       - Conventions: conventions.md
+      - Interactive Viewer: viewer.md
   - Tutorials:
       - Mesh Optimization: tutorials/mesh_optimization.md
       - Point Cloud Fitting: tutorials/pointcloud_fitting.md
@@ -77,4 +78,5 @@ nav:
       - Neural Networks: api/nn.md
       - Gaussian Splatting: api/splatting.md
       - Datasets: api/datasets.md
+      - Viewer: api/viewer.md
       - Utils: api/utils.md

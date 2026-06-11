@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MLX3D Viewer</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0b0f;
+               font-family: -apple-system, "SF Pro Text", Helvetica, sans-serif; }
+  #view { width: 100%; height: 100%; display: block; cursor: grab;
+          touch-action: none; image-rendering: auto; }
+  #view.dragging { cursor: grabbing; }
+  .hud { position: fixed; padding: 8px 12px; border-radius: 10px;
+         background: rgba(15, 15, 22, 0.72); backdrop-filter: blur(12px);
+         color: #cfcfe0; font-size: 12px; line-height: 1.55; user-select: none; }
+  #stats { top: 12px; left: 12px; }
+  #stats b { color: #fff; font-size: 13px; }
+  #help { bottom: 12px; left: 12px; max-width: 280px; }
+  #help kbd { background: #2a2a38; border-radius: 4px; padding: 0 5px;
+              font-family: ui-monospace, monospace; font-size: 11px; }
+  #badge { top: 12px; right: 12px; color: #9d8cff; font-weight: 600; }
+  #spinner { position: fixed; top: 16px; right: 130px; width: 10px; height: 10px;
+             border-radius: 50%; background: #9d8cff; opacity: 0;
+             transition: opacity .2s; }
+  #spinner.busy { opacity: 1; animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { transform: scale(0.4); opacity: .4; } }
+  #err { top: 50%; left: 50%; transform: translate(-50%, -50%);
+         color: #ff7b7b; display: none; }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div class="hud" id="stats"><b>MLX3D</b><br><span id="statline">connecting…</span></div>
+<div class="hud" id="help">
+  <b>Controls</b><br>
+  drag — orbit &nbsp;·&nbsp; <kbd>shift</kbd>+drag / right-drag — pan<br>
+  scroll / pinch — zoom &nbsp;·&nbsp; <kbd>R</kbd> reset &nbsp;·&nbsp; <kbd>U</kbd> flip up<br>
+  <kbd>H</kbd> toggle this panel &nbsp;·&nbsp; <kbd>[</kbd> <kbd>]</kbd> quality
+</div>
+<div class="hud" id="badge">mlx3d</div>
+<div id="spinner"></div>
+<div class="hud" id="err"></div>
+
+<script>
+"use strict";
+const canvas = document.getElementById("view");
+const ctx = canvas.getContext("2d");
+const statline = document.getElementById("statline");
+const spinner = document.getElementById("spinner");
+const errBox = document.getElementById("err");
+
+// ----------------------------------------------------------- camera state
+const home = { theta: 0.6, phi: 0.3, radius: 4.0, target: [0, 0, 0], fov: 60 };
+let cam = null;
+let upSign = 1, resScale = 1.0, maxScale = 1.0, dirty = true, info = {};
+let lastFrameMs = 0, shownW = 0, shownH = 0;
+
+function resetCamera() {
+  cam = { theta: home.theta, phi: home.phi, radius: home.radius,
+          target: home.target.slice(), fov: home.fov };
+  dirty = true;
+}
+resetCamera();
+
+fetch("/info").then(r => r.json()).then(meta => {
+  info = meta;
+  if (meta.radius) home.radius = meta.radius;
+  if (meta.target) home.target = meta.target;
+  if (meta.fov) home.fov = meta.fov;
+  if (meta.heavy) maxScale = 0.5;   // NeRF: render at half resolution by default
+  resetCamera();
+});
+
+// camera basis for panning (matches the server's spherical convention)
+function basis() {
+  const ct = Math.cos(cam.theta), st = Math.sin(cam.theta);
+  const cp = Math.cos(cam.phi), sp = Math.sin(cam.phi);
+  const fwd = [-cp * st, -upSign * sp, -cp * ct];           // target - eye, normalized
+  const up = [0, upSign, 0];
+  let right = [fwd[1] * up[2] - fwd[2] * up[1],
+               fwd[2] * up[0] - fwd[0] * up[2],
+               fwd[0] * up[1] - fwd[1] * up[0]];
+  const rl = Math.hypot(...right) || 1;
+  right = right.map(v => v / rl);
+  const upv = [right[1] * fwd[2] - right[2] * fwd[1],
+               right[2] * fwd[0] - right[0] * fwd[2],
+               right[0] * fwd[1] - right[1] * fwd[0]];
+  return { right, upv };
+}
+
+// ------------------------------------------------------------ interaction
+let dragging = false, panning = false, lastX = 0, lastY = 0, interactT = 0;
+
+function markInteract() { interactT = performance.now(); dirty = true; }
+
+canvas.addEventListener("pointerdown", e => {
+  dragging = true;
+  panning = e.shiftKey || e.button === 2 || e.button === 1;
+  lastX = e.clientX; lastY = e.clientY;
+  canvas.classList.add("dragging");
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener("pointerup", e => {
+  dragging = false;
+  canvas.classList.remove("dragging");
+  markInteract();
+});
+canvas.addEventListener("pointermove", e => {
+  if (!dragging) return;
+  const dx = e.clientX - lastX, dy = e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+  if (panning) {
+    const { right, upv } = basis();
+    const k = cam.radius * 0.0016;
+    for (let i = 0; i < 3; i++)
+      cam.target[i] += (-dx * right[i] + dy * upv[i]) * k;
+  } else {
+    cam.theta -= dx * 0.005;
+    cam.phi = Math.min(1.55, Math.max(-1.55, cam.phi + dy * 0.005));
+  }
+  markInteract();
+});
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  cam.radius *= Math.exp(e.deltaY * 0.0012);
+  cam.radius = Math.max(0.01, Math.min(1e4, cam.radius));
+  markInteract();
+}, { passive: false });
+canvas.addEventListener("contextmenu", e => e.preventDefault());
+
+window.addEventListener("keydown", e => {
+  if (e.key === "r" || e.key === "R") { resetCamera(); }
+  else if (e.key === "u" || e.key === "U") { upSign = -upSign; dirty = true; }
+  else if (e.key === "h" || e.key === "H") {
+    const el = document.getElementById("help");
+    el.style.display = el.style.display === "none" ? "" : "none";
+  }
+  else if (e.key === "[") { maxScale = Math.max(0.25, maxScale - 0.25); dirty = true; }
+  else if (e.key === "]") { maxScale = Math.min(1.0, maxScale + 0.25); dirty = true; }
+});
+
+// ---------------------------------------------------------- render loop
+function fitCanvas() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.round(canvas.clientWidth * dpr);
+  const h = Math.round(canvas.clientHeight * dpr);
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w; canvas.height = h; dirty = true;
+  }
+}
+window.addEventListener("resize", () => { fitCanvas(); dirty = true; });
+
+async function frameLoop() {
+  fitCanvas();
+  for (;;) {
+    const interacting = dragging || performance.now() - interactT < 250;
+    if (!dirty && !interacting) {            // idle: stop rendering, save the GPU
+      await new Promise(r => setTimeout(r, 30));
+      continue;
+    }
+    // Adaptive resolution: drop while interacting, full when settled.
+    let scale = maxScale * (interacting ? 0.5 : 1.0);
+    if (interacting && lastFrameMs > 80) scale *= 0.5;   // heavy scenes degrade more
+    const w = Math.max(32, Math.round(canvas.width * scale));
+    const h = Math.max(32, Math.round(canvas.height * scale));
+    const q = interacting ? 70 : 90;
+
+    const p = new URLSearchParams({
+      theta: cam.theta.toFixed(5), phi: cam.phi.toFixed(5),
+      radius: cam.radius.toFixed(5),
+      tx: cam.target[0].toFixed(5), ty: cam.target[1].toFixed(5),
+      tz: cam.target[2].toFixed(5),
+      fov: cam.fov, w, h, q, up: upSign,
+    });
+    dirty = false;
+    spinner.classList.add("busy");
+    const t0 = performance.now();
+    try {
+      const resp = await fetch("/render?" + p.toString());
+      if (!resp.ok) throw new Error(await resp.text());
+      const blob = await resp.blob();
+      const bmp = await createImageBitmap(blob);
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+      bmp.close();
+      errBox.style.display = "none";
+      lastFrameMs = performance.now() - t0;
+      shownW = w; shownH = h;
+      updateStats();
+    } catch (err) {
+      errBox.textContent = "render error: " + err.message;
+      errBox.style.display = "block";
+      await new Promise(r => setTimeout(r, 500));
+      dirty = true;
+    }
+    spinner.classList.remove("busy");
+  }
+}
+
+function updateStats() {
+  const fps = lastFrameMs > 0 ? (1000 / lastFrameMs).toFixed(1) : "—";
+  const parts = [`${fps} fps`, `${shownW}×${shownH}`];
+  if (info.gaussians) parts.push(`${info.gaussians.toLocaleString()} gaussians`);
+  if (info.mode) parts.push(info.mode);
+  statline.textContent = parts.join("  ·  ");
+}
+
+frameLoop();
+</script>
+</body>
+</html>

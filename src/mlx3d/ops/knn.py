@@ -23,7 +23,7 @@ def knn_points(
     p1: mx.array,
     p2: mx.array,
     K: int = 1,
-    chunk_size: int = 16384,
+    chunk_size: int = 4096,
 ) -> tuple[mx.array, mx.array]:
     """For each point in ``p1`` find its ``K`` nearest neighbors in ``p2``.
 
@@ -50,10 +50,17 @@ def knn_points(
         if K == 1:
             idx = mx.argmin(d, axis=-1, keepdims=True)
             dist = mx.take_along_axis(d, idx, axis=-1)
+        elif K < P2:
+            # argpartition + small sort instead of a full argsort of the
+            # (chunk, P2) matrix, which would allocate K-independent memory.
+            part = mx.argpartition(d, kth=K - 1, axis=-1)[..., :K]
+            dist_part = mx.take_along_axis(d, part, axis=-1)
+            order = mx.argsort(dist_part, axis=-1)
+            idx = mx.take_along_axis(part, order, axis=-1)
+            dist = mx.take_along_axis(dist_part, order, axis=-1)
         else:
-            idx_full = mx.argsort(d, axis=-1)[..., :K]
-            dist = mx.take_along_axis(d, idx_full, axis=-1)
-            idx = idx_full
+            idx = mx.argsort(d, axis=-1)
+            dist = mx.take_along_axis(d, idx, axis=-1)
         dists_out.append(dist)
         idx_out.append(idx)
 
