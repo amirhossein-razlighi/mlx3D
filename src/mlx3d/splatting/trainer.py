@@ -5,12 +5,11 @@ rates, an L1 + D-SSIM photometric loss, accumulation of screen-space
 positional gradients, and periodic adaptive density control.
 """
 
-from dataclasses import dataclass, field
-
-import numpy as np
+from dataclasses import dataclass
 
 import mlx.core as mx
 import mlx.optimizers as optim
+import numpy as np
 
 from ..cameras import Camera
 from ..losses import ssim
@@ -140,7 +139,7 @@ class GaussianTrainer:
                 self.step_count % cfg.densify_every == 0
                 and self.step_count > cfg.densify_from
             ):
-                stats = self.model.densify_and_prune(
+                self.model.densify_and_prune(
                     mx.array(self.grad_accum.astype(np.float32)),
                     mx.array(self.grad_count.astype(np.float32)),
                     grad_threshold=cfg.densify_grad_threshold,

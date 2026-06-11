@@ -9,9 +9,8 @@ plus triangular face lists.
 import os
 from dataclasses import dataclass, field
 
-import numpy as np
-
 import mlx.core as mx
+import numpy as np
 
 __all__ = ["load_ply", "save_ply", "PlyData"]
 

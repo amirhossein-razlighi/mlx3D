@@ -1,4 +1,3 @@
-import math
 
 import mlx.core as mx
 import numpy as np

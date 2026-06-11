@@ -5,9 +5,8 @@ import math
 import os
 from dataclasses import dataclass
 
-import numpy as np
-
 import mlx.core as mx
+import numpy as np
 
 from ..cameras import Camera
 
