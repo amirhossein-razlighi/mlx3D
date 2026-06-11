@@ -88,10 +88,9 @@ def test_render_rays_end_to_end():
         res = render_rays(m, o, d, 0.5, 3.0, num_coarse=8)
         return mx.sum(res["rgb"] ** 2)
 
-    grads = nn.value_and_grad(model, loss_fn)(model)[1]
-    flat = mx.utils.tree_flatten(grads) if hasattr(mx, "utils") else None
-    # At least check the call succeeded and produced finite loss.
-    assert np.isfinite(float(loss_fn(model)))
+    loss, grads = nn.value_and_grad(model, loss_fn)(model)
+    mx.eval(grads)
+    assert np.isfinite(float(loss))
 
 
 def test_render_points_visibility_and_grads():

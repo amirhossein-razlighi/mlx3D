@@ -4,7 +4,6 @@ import struct
 
 import mlx.core as mx
 import numpy as np
-import pytest
 from PIL import Image
 
 from mlx3d.datasets import load_blender, load_colmap

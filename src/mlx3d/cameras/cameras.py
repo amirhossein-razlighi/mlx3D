@@ -12,7 +12,7 @@ without axis gymnastics.
 """
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import mlx.core as mx
 

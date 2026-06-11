@@ -8,9 +8,8 @@ vertex-color extension (``v x y z r g b``).
 import os
 from dataclasses import dataclass
 
-import numpy as np
-
 import mlx.core as mx
+import numpy as np
 
 __all__ = ["load_obj", "save_obj", "ObjData"]
 

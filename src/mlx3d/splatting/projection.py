@@ -45,7 +45,6 @@ def project_gaussians(
             - ``depths`` (N,): camera-space z.
             - ``radii`` (N,): conservative pixel radii (0 for culled Gaussians).
     """
-    N = means.shape[0]
     R, t = camera.R, camera.t
     p_cam = means @ R.T + t  # (N, 3)
     x, y, z = p_cam[:, 0], p_cam[:, 1], p_cam[:, 2]

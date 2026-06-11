@@ -1,6 +1,5 @@
 import mlx.core as mx
 import numpy as np
-import pytest
 
 from mlx3d.transforms import (
     axis_angle_to_matrix,

@@ -15,9 +15,8 @@ respect to vertex positions, so a ``Meshes`` can be rebuilt every iteration
 of an optimization loop from a vertex array with gradients flowing through.
 """
 
-import numpy as np
-
 import mlx.core as mx
+import numpy as np
 
 __all__ = ["Meshes", "join_meshes_as_batch"]
 

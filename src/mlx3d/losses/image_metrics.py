@@ -1,6 +1,5 @@
 """Differentiable image metrics (PSNR, SSIM) used for view-synthesis training."""
 
-import math
 
 import mlx.core as mx
 

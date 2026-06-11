@@ -73,7 +73,6 @@ def render_points(
     flat_idx = idx.reshape(-1)
     flat_w = w.reshape(-1)
 
-    K = window * window
     wc = (w[..., None] * colors[:, None, :]).reshape(-1, 3)  # (P*K, 3)
     wz = (w * z[:, None]).reshape(-1)
 

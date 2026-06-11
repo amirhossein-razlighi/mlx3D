@@ -1,8 +1,7 @@
 """The trainable Gaussian Splatting scene representation."""
 
-import numpy as np
-
 import mlx.core as mx
+import numpy as np
 
 from ..cameras import Camera
 from ..io import load_ply, save_ply

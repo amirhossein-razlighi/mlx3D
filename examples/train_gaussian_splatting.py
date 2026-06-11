@@ -16,9 +16,8 @@ periodic renders.
 import argparse
 import os
 
-import numpy as np
-
 import mlx.core as mx
+import numpy as np
 
 from mlx3d.losses import psnr
 from mlx3d.splatting import GaussianModel, GaussianTrainer, TrainerConfig

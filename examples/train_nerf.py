@@ -11,14 +11,12 @@ Renders a test view to outputs/nerf_view.png every 1000 iterations.
 import argparse
 import os
 
-import numpy as np
-
 import mlx.core as mx
 import mlx.nn as nn
 import mlx.optimizers as optim
+import numpy as np
 
 from mlx3d.datasets import load_blender
-from mlx3d.losses import psnr
 from mlx3d.nn import NeRF, render_rays
 
 
