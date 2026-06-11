@@ -14,22 +14,18 @@ permissions:
 
 jobs:
   docs:
-    runs-on: ubuntu-latest
+    runs-on: macos-14
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v3
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - name: Install dependencies
         run: |
-          pip install sphinx myst_parser sphinx-book-theme
-      - name: Sphinx build
-        run: |
-          sphinx-build documentation/source _build
+          pip install -e .
+          pip install mkdocs-material "mkdocstrings[python]"
+      - name: Build docs
+        run: mkdocs build --strict
       - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        with:
-          publish_branch: gh-pages
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: _build/
-          force_orphan: true
-          
+        run: mkdocs gh-deploy --force

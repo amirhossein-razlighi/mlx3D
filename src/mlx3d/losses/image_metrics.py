@@ -33,7 +33,8 @@ def ssim(
     """Structural similarity (mean SSIM) with a Gaussian window.
 
     Args:
-        pred / target: (H, W, C) or (N, H, W, C) images in [0, max_val].
+        pred: (H, W, C) or (N, H, W, C) image in [0, max_val].
+        target: image with the same shape as ``pred``.
 
     Returns:
         Scalar mean SSIM. Use ``1 - ssim(...)`` as a loss (the Gaussian

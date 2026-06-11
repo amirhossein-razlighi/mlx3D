@@ -11,7 +11,7 @@ def sample_points_from_meshes(
     meshes: Meshes,
     num_samples: int = 10000,
     return_normals: bool = False,
-):
+) -> mx.array | tuple[mx.array, mx.array]:
     """Uniformly sample points from mesh surfaces (area-weighted).
 
     Sampling locations are differentiable with respect to vertex positions
@@ -24,7 +24,8 @@ def sample_points_from_meshes(
         return_normals: also return the face normal at each sample.
 
     Returns:
-        (N, num_samples, 3) samples, plus (N, num_samples, 3) normals if requested.
+        An (N, num_samples, 3) array of samples, plus an (N, num_samples, 3)
+        array of normals if ``return_normals`` is set.
     """
     verts = meshes.verts_packed()
     faces = meshes.faces_packed()
