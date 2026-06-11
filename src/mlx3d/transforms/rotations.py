@@ -162,10 +162,11 @@ def rotation_6d_to_matrix(d6: mx.array) -> mx.array:
     Reference: Zhou et al., "On the Continuity of Rotation Representations in
     Neural Networks" (CVPR 2019).
     """
+    eps = 1e-12
     a1, a2 = d6[..., :3], d6[..., 3:]
-    b1 = a1 / mx.linalg.norm(a1, axis=-1, keepdims=True)
+    b1 = a1 / mx.maximum(mx.linalg.norm(a1, axis=-1, keepdims=True), eps)
     a2 = a2 - mx.sum(b1 * a2, axis=-1, keepdims=True) * b1
-    b2 = a2 / mx.linalg.norm(a2, axis=-1, keepdims=True)
+    b2 = a2 / mx.maximum(mx.linalg.norm(a2, axis=-1, keepdims=True), eps)
     b3 = mx.linalg.cross(b1, b2)
     return mx.stack([b1, b2, b3], axis=-2)
 
