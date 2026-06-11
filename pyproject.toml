@@ -1,22 +1,21 @@
 [build-system]
-requires = ["poetry-core>=1.9.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.poetry]
+[project]
 name = "mlx3d"
-version = "0.0.1"
-description = "Differentiable 3D rendering and geometry ops on Apple Silicon with MLX"
-authors = ["AmirHossein Razlighi <arazlighi@gmail.com>"]
-license = "MIT"
+version = "0.1.0"
+description = "Differentiable 3D computer vision on Apple Silicon, built on MLX"
+authors = [{ name = "AmirHossein Razlighi", email = "arazlighi@gmail.com" }]
+license = { text = "MIT" }
 readme = "README.md"
-homepage = "https://github.com/amirhossein-razlighi/mlx3D"
-repository = "https://github.com/amirhossein-razlighi/mlx3D"
-keywords = ["3D", "graphics", "renderer", "differentiable", "MLX", "Apple Silicon", "Metal"]
-packages = [{ include = "mlx3d", from = "src" }]
-
-
+requires-python = ">=3.10"
+keywords = [
+  "3D", "graphics", "renderer", "differentiable", "MLX", "Apple Silicon",
+  "Metal", "gaussian splatting", "nerf", "computer vision",
+]
 classifiers = [
-  "Development Status :: 2 - Pre-Alpha",
+  "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
@@ -26,39 +25,40 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Operating System :: MacOS :: MacOS X",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
-  "Topic :: Multimedia :: Graphics"
+  "Topic :: Multimedia :: Graphics",
+]
+dependencies = [
+  "mlx>=0.31.0; platform_system == 'Darwin' and platform_machine == 'arm64'",
+  "numpy>=1.24",
+  "pillow>=10.0",
+  "tqdm>=4.66",
 ]
 
-[tool.poetry.dependencies]
-python = ">=3.10,<3.13"
-mlx = { version = ">=0.10.0", markers = "platform_system == 'Darwin' and platform_machine == 'arm64'" }
-numpy = ">=1.24"
-pillow = ">=10.0"
-typing-extensions = ">=4.8"
+[dependency-groups]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.5",
+  "mkdocs-material>=9.5",
+  "mkdocstrings[python]>=0.24",
+]
 
+[project.scripts]
+mlx3d-view = "mlx3d.viewer.__main__:main"
 
-[tool.poetry.group.dev.dependencies]
-ruff = ">=0.5"
-mypy = ">=1.8"
-pytest = ">=8.0"
-pytest-cov = ">=4.1"
+[project.urls]
+Homepage = "https://github.com/amirhossein-razlighi/mlx3D"
+Documentation = "https://amirhossein-razlighi.github.io/mlx3D/"
+Repository = "https://github.com/amirhossein-razlighi/mlx3D"
 
-[tool.poetry.scripts]
-mlx3d-hello = "mlx3d.renderer.hello:main"
+[tool.hatch.build.targets.wheel]
+packages = ["src/mlx3d"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-select = ["I"]  # isort
 
-[tool.mypy]
-python_version = "3.11"
-warn_unused_ignores = true
-warn_redundant_casts = true
-disallow_untyped_defs = true
-no_implicit_optional = true
-strict_optional = true
-ignore_missing_imports = true
+[tool.ruff.lint]
+extend-select = ["I"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
