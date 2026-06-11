@@ -115,13 +115,16 @@ class GaussianTrainer:
         return loss, (img, proj["radii"])
 
     # -------------------------------------------------------------------- step
-    def step(self, camera: Camera, target: mx.array) -> dict[str, float]:
+    def step(self, camera: Camera, target: mx.array) -> dict[str, object]:
         """One optimization step on a single view. Returns logging info."""
         self.step_count += 1
         cfg = self.config
         bg = mx.ones((3,)) if cfg.white_background else mx.zeros((3,))
         params = self.model.params
         probe = mx.zeros((self.model.num_gaussians, 2))
+        densify_stats = None
+        opacity_reset = False
+        sh_degree_changed = False
 
         def loss_fn(params, probe):
             loss, aux = self._render_loss(params, probe, camera, target, bg)
@@ -162,7 +165,7 @@ class GaussianTrainer:
                     and self.model.num_gaussians >= cfg.max_gaussians
                 )
                 threshold = float("inf") if at_cap else cfg.densify_grad_threshold
-                self.model.densify_and_prune(
+                densify_stats = self.model.densify_and_prune(
                     mx.array(self.grad_accum.astype(np.float32)),
                     mx.array(self.grad_count.astype(np.float32)),
                     grad_threshold=threshold,
@@ -177,12 +180,18 @@ class GaussianTrainer:
         if self.step_count % cfg.opacity_reset_every == 0 and self.step_count <= cfg.densify_until:
             self.model.reset_opacities()
             self._build_optimizers()
+            opacity_reset = True
 
         if self.step_count % cfg.sh_increase_every == 0:
             self.model.one_up_sh_degree()
+            sh_degree_changed = True
 
         return {
             "loss": float(loss),
             "num_gaussians": self.model.num_gaussians,
             "step": self.step_count,
+            "active_sh_degree": self.model.active_sh_degree,
+            "densify": densify_stats,
+            "opacity_reset": opacity_reset,
+            "sh_degree_changed": sh_degree_changed,
         }

@@ -30,6 +30,18 @@ def test_knn_matches_numpy():
     assert (np.array(idx) == ref_idx).mean() > 0.99  # ties may differ
 
 
+def test_knn_unbatched_small_k_matches_numpy():
+    p1 = mx.random.normal((128, 3))
+    p2 = mx.random.normal((96, 3))
+    d, idx = knn_points(p1, p2, K=4)
+    a, b = np.array(p1), np.array(p2)
+    full = ((a[:, None, :] - b[None, :, :]) ** 2).sum(-1)
+    ref_idx = np.argsort(full, axis=-1)[:, :4]
+    ref_d = np.take_along_axis(full, ref_idx, axis=-1)
+    np.testing.assert_allclose(np.array(d), ref_d, atol=1e-4)
+    assert (np.array(idx) == ref_idx).mean() > 0.99
+
+
 def test_knn_chunked_consistent():
     p1 = mx.random.normal((1, 500, 3))
     p2 = mx.random.normal((1, 200, 3))
