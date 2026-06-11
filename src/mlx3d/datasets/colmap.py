@@ -12,6 +12,7 @@ import mlx.core as mx
 import numpy as np
 
 from ..cameras import Camera
+from .images import ImageCollection
 
 __all__ = ["ColmapDataset", "load_colmap"]
 
@@ -19,7 +20,7 @@ __all__ = ["ColmapDataset", "load_colmap"]
 @dataclass
 class ColmapDataset:
     cameras: list[Camera]
-    images: list[mx.array]
+    images: ImageCollection
     image_names: list[str]
     points: mx.array        # (P, 3) SfM points
     point_colors: mx.array  # (P, 3) in [0, 1]
@@ -114,14 +115,19 @@ def load_colmap(
     images_dir: str = "images",
     downscale: int = 1,
     load_images: bool = True,
+    cache: str = "ram",
 ) -> ColmapDataset:
     """Load a COLMAP scene laid out as ``root/sparse/0`` + ``root/<images_dir>``.
 
     COLMAP already uses the OpenCV camera convention, so extrinsics map
     directly onto :class:`~mlx3d.cameras.Camera`.
-    """
-    from PIL import Image
 
+    Args:
+        cache: image storage policy — ``"ram"`` (float32, fastest),
+            ``"uint8"`` (4x less memory, negligible per-access cost), or
+            ``"disk"`` (paths only, decode on access; near-zero resident
+            memory). See :class:`~mlx3d.datasets.images.ImageCollection`.
+    """
     sparse = os.path.join(root, "sparse", "0")
     if not os.path.isdir(sparse):
         sparse = os.path.join(root, "sparse")
@@ -130,7 +136,7 @@ def load_colmap(
     xyz, rgb = _read_points3d_bin(os.path.join(sparse, "points3D.bin"))
 
     cameras: list[Camera] = []
-    images: list[mx.array] = []
+    images = ImageCollection(cache=cache, downscale=downscale, white_background=None)
     names: list[str] = []
     for _, meta in sorted(imgs_meta.items(), key=lambda kv: kv[1]["name"]):
         cam = cams_meta[meta["camera_id"]]
@@ -146,31 +152,25 @@ def load_colmap(
         else:  # pragma: no cover
             raise ValueError(f"Unsupported camera model {cam['model']}")
 
-        W, H = cam["width"], cam["height"]
-        s = 1.0 / downscale
+        # PIL's resize floors the size; mirror that so intrinsics stay exact
+        # without decoding any image up front.
+        W = cam["width"] // downscale
+        H = cam["height"] // downscale
+        sx = W / cam["width"]
+        sy = H / cam["height"]
         R = _qvec_to_rotmat(meta["qvec"])
         t = meta["tvec"]
-
-        img_arr = None
-        if load_images:
-            img = Image.open(os.path.join(root, images_dir, meta["name"])).convert("RGB")
-            if downscale > 1:
-                img = img.resize((img.width // downscale, img.height // downscale),
-                                 Image.LANCZOS)
-            img_arr = mx.array(np.asarray(img, dtype=np.float32) / 255.0)
-            H, W = img_arr.shape[:2]
-            s = W / cam["width"]
 
         cameras.append(
             Camera(
                 R=mx.array(R.astype(np.float32)),
                 t=mx.array(t.astype(np.float32)),
-                fx=fx * s, fy=fy * s, cx=cx * s, cy=cy * s,
+                fx=fx * sx, fy=fy * sy, cx=cx * sx, cy=cy * sy,
                 width=int(W), height=int(H),
             )
         )
-        if img_arr is not None:
-            images.append(img_arr)
+        if load_images:
+            images.append_file(os.path.join(root, images_dir, meta["name"]))
         names.append(meta["name"])
 
     return ColmapDataset(
