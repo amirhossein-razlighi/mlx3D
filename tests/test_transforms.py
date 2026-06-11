@@ -67,6 +67,7 @@ def test_rotation_6d_near_zero_vectors_stable():
     d6 = mx.array([[0.0, 0.0, 0.0, 1e-14, -1e-14, 2e-14]])
     m = rotation_6d_to_matrix(d6)
     assert not bool(mx.isnan(m).any())
+    assert not bool(mx.isinf(m).any())
 
 
 def test_quaternion_apply_matches_matrix():
