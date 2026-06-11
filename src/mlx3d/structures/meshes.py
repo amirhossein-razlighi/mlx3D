@@ -36,9 +36,11 @@ class Meshes:
     """Batch of triangle meshes.
 
     Args:
-        verts: list of ``(V_i, 3)`` float arrays, or a padded ``(N, V, 3)`` array.
-        faces: list of ``(F_i, 3)`` integer arrays, or a padded ``(N, F, 3)``
-            array where unused rows are filled with ``-1``.
+        verts (list[mx.array] | mx.array): list of ``(V_i, 3)`` float arrays,
+            or a padded ``(N, V, 3)`` array.
+        faces (list[mx.array] | mx.array): list of ``(F_i, 3)`` integer
+            arrays, or a padded ``(N, F, 3)`` array where unused rows are
+            filled with ``-1``.
     """
 
     def __init__(self, verts, faces) -> None:

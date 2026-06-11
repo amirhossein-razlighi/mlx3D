@@ -14,9 +14,12 @@ class Pointclouds:
     """Batch of point clouds with optional per-point normals and features.
 
     Args:
-        points: list of ``(P_i, 3)`` arrays or a padded ``(N, P, 3)`` array.
-        normals: optional, same layout as ``points``.
-        features: optional, list of ``(P_i, C)`` arrays or padded ``(N, P, C)``.
+        points (list[mx.array] | mx.array): list of ``(P_i, 3)`` arrays or a
+            padded ``(N, P, 3)`` array.
+        normals (list[mx.array] | mx.array | None): optional, same layout as
+            ``points``.
+        features (list[mx.array] | mx.array | None): optional, list of
+            ``(P_i, C)`` arrays or padded ``(N, P, C)``.
     """
 
     def __init__(self, points, normals=None, features=None) -> None:

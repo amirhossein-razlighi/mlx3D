@@ -19,8 +19,9 @@ def chamfer_distance(
     Args:
         x: (N, P1, 3) or (P1, 3).
         y: (N, P2, 3) or (P2, 3).
-        x_normals / y_normals: optional matching normals; if both given, a
-            normal-consistency term (1 - |cos|) is also returned.
+        x_normals: optional (N, P1, 3) normals for ``x``.
+        y_normals: optional (N, P2, 3) normals for ``y``; if both are given,
+            a normal-consistency term (1 - |cos|) is also returned.
         single_directional: only use the x -> y direction.
 
     Returns:
