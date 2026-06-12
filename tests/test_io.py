@@ -1,6 +1,7 @@
 import mlx.core as mx
 import numpy as np
 import pytest
+from PIL import Image
 
 from mlx3d.io import load_obj, load_ply, save_obj, save_ply
 
@@ -13,15 +14,30 @@ def assert_close(a, b, atol=1e-5):
 def cube():
     verts = mx.array(
         [
-            [-1.0, -1.0, -1.0], [1.0, -1.0, -1.0], [1.0, 1.0, -1.0], [-1.0, 1.0, -1.0],
-            [-1.0, -1.0, 1.0], [1.0, -1.0, 1.0], [1.0, 1.0, 1.0], [-1.0, 1.0, 1.0],
+            [-1.0, -1.0, -1.0],
+            [1.0, -1.0, -1.0],
+            [1.0, 1.0, -1.0],
+            [-1.0, 1.0, -1.0],
+            [-1.0, -1.0, 1.0],
+            [1.0, -1.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [-1.0, 1.0, 1.0],
         ]
     )
     faces = mx.array(
         [
-            [0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7],
-            [0, 1, 5], [0, 5, 4], [2, 3, 7], [2, 7, 6],
-            [1, 2, 6], [1, 6, 5], [3, 0, 4], [3, 4, 7],
+            [0, 2, 1],
+            [0, 3, 2],
+            [4, 5, 6],
+            [4, 6, 7],
+            [0, 1, 5],
+            [0, 5, 4],
+            [2, 3, 7],
+            [2, 7, 6],
+            [1, 2, 6],
+            [1, 6, 5],
+            [3, 0, 4],
+            [3, 4, 7],
         ]
     )
     return verts, faces
@@ -71,6 +87,26 @@ def test_obj_with_normals_texcoords(tmp_path):
     assert data.normals.shape == (1, 3)
     assert data.faces_texcoords_idx[0].tolist() == [0, 1, 2]
     assert data.faces_normals_idx[0].tolist() == [0, 0, 0]
+
+
+def test_obj_loads_mtl_diffuse_texture(tmp_path):
+    Image.fromarray(np.array([[[255, 0, 0], [0, 255, 0]]], dtype=np.uint8)).save(
+        tmp_path / "albedo.png"
+    )
+    (tmp_path / "mat.mtl").write_text("newmtl mat\nmap_Kd albedo.png\n")
+    p = tmp_path / "textured.obj"
+    p.write_text(
+        "mtllib mat.mtl\n"
+        "v 0 0 0\nv 1 0 0\nv 0 1 0\n"
+        "vt 0 0\nvt 1 0\nvt 0 1\n"
+        "usemtl mat\n"
+        "f 1/1 2/2 3/3\n"
+    )
+    data = load_obj(str(p))
+    assert data.texture_path is not None
+    assert data.texture_image is not None
+    assert data.texture_image.shape == (1, 2, 3)
+    assert data.faces_texcoords_idx[0].tolist() == [0, 1, 2]
 
 
 @pytest.mark.parametrize("binary", [True, False])

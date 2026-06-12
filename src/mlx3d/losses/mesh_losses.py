@@ -57,9 +57,7 @@ def mesh_normal_consistency(meshes: Meshes) -> mx.array:
     if faces_np.shape[0] == 0:
         return mx.array(0.0)
 
-    edges = np.concatenate(
-        [faces_np[:, [0, 1]], faces_np[:, [1, 2]], faces_np[:, [2, 0]]], axis=0
-    )
+    edges = np.concatenate([faces_np[:, [0, 1]], faces_np[:, [1, 2]], faces_np[:, [2, 0]]], axis=0)
     edges.sort(axis=1)
     face_idx = np.tile(np.arange(faces_np.shape[0]), 3)
     order = np.lexsort((edges[:, 1], edges[:, 0]))
@@ -72,9 +70,7 @@ def mesh_normal_consistency(meshes: Meshes) -> mx.array:
         return mx.array(0.0)
 
     normals = meshes.faces_normals_packed()
-    normals = normals / mx.maximum(
-        mx.linalg.norm(normals, axis=-1, keepdims=True), 1e-12
-    )
+    normals = normals / mx.maximum(mx.linalg.norm(normals, axis=-1, keepdims=True), 1e-12)
     na = normals[mx.array(pair_a.astype(np.int32))]
     nb = normals[mx.array(pair_b.astype(np.int32))]
     cos = mx.sum(na * nb, axis=-1)

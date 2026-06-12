@@ -1,5 +1,6 @@
 """Differentiable image metrics (PSNR, SSIM) used for view-synthesis training."""
 
+from __future__ import annotations
 
 import mlx.core as mx
 

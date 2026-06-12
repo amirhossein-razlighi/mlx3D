@@ -77,9 +77,7 @@ def render_gaussians(
         tiles_y,
         background=background,
     )
-    out.update(
-        {"means2d": proj["means2d"], "depths": proj["depths"], "radii": proj["radii"]}
-    )
+    out.update({"means2d": proj["means2d"], "depths": proj["depths"], "radii": proj["radii"]})
     return out
 
 
@@ -118,7 +116,5 @@ def render_gaussian_depth(
         tiles_x,
         tiles_y,
     )
-    out.update(
-        {"means2d": proj["means2d"], "depths": proj["depths"], "radii": proj["radii"]}
-    )
+    out.update({"means2d": proj["means2d"], "depths": proj["depths"], "radii": proj["radii"]})
     return out

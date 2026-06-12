@@ -88,8 +88,8 @@ class Viewer:
         def f(name: str, default: float) -> float:
             return float(q.get(name, [default])[0])
 
-        theta = f("theta", 0.0)        # azimuth, radians
-        phi = f("phi", 0.0)            # elevation, radians
+        theta = f("theta", 0.0)  # azimuth, radians
+        phi = f("phi", 0.0)  # elevation, radians
         radius = max(f("radius", 4.0), 1e-3)
         target = mx.array([f("tx", 0.0), f("ty", 0.0), f("tz", 0.0)])
         fov = f("fov", 60.0)
@@ -105,8 +105,12 @@ class Viewer:
             ]
         )
         return Camera.look_at(
-            eye=eye, at=target, up=(0.0, up_sign, 0.0),
-            fov=fov, width=width, height=height,
+            eye=eye,
+            at=target,
+            up=(0.0, up_sign, 0.0),
+            fov=fov,
+            width=width,
+            height=height,
         )
 
     def render_jpeg(self, camera: Camera, quality: int = 85, mode: str = "rgb") -> bytes:
@@ -203,9 +207,7 @@ class LiveGaussianViewer:
         if initial_radius is None or initial_target is None:
             means = np.array(self._params["means"])
             center = means.mean(axis=0)
-            radius = (
-                float(np.percentile(np.linalg.norm(means - center, axis=1), 90)) * 2.5 + 1e-3
-            )
+            radius = float(np.percentile(np.linalg.norm(means - center, axis=1), 90)) * 2.5 + 1e-3
         else:
             center = np.array(initial_target, dtype=np.float32)
             radius = float(initial_radius)
@@ -425,9 +427,15 @@ def view_nerf(
         out = []
         for s in range(0, o.shape[0], chunk):
             res = render_rays(
-                model, o[s : s + chunk], d[s : s + chunk], near, far,
-                num_coarse=num_coarse, num_fine=num_fine,
-                stratified=False, white_background=white_background,
+                model,
+                o[s : s + chunk],
+                d[s : s + chunk],
+                near,
+                far,
+                num_coarse=num_coarse,
+                num_fine=num_fine,
+                stratified=False,
+                white_background=white_background,
             )
             out.append(res["rgb"])
             mx.eval(out[-1])

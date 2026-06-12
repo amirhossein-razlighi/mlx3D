@@ -191,6 +191,7 @@ def test_kernel_matches_reference_gradients(random_scene):
             else:
                 o = render_fn(cam, means, quats, scales, opac, colors, background=bg)
             return ((o["image"] - target) ** 2).mean() + 0.05 * o["alpha"].mean()
+
         return loss
 
     gk = mx.grad(make_loss(render_gaussians, True), argnums=(0, 1, 2, 3, 4))(
@@ -395,15 +396,14 @@ def test_trainer_preserves_optimizer_state_after_densify_resize():
     keep_idx_np = np.array([1, 3, 6], dtype=np.int32)
     keep_idx = mx.array(keep_idx_np)
     model.select(keep_idx_np)
-    model.append({
-        k: mx.zeros((2, *v.shape[1:]), dtype=v.dtype)
-        for k, v in model.params.items()
-    })
+    model.append({k: mx.zeros((2, *v.shape[1:]), dtype=v.dtype) for k, v in model.params.items()})
 
-    trainer._resize_optimizer_states_after_densify({
-        "_keep_idx": keep_idx_np,
-        "_new_count": 2,
-    })
+    trainer._resize_optimizer_states_after_densify(
+        {
+            "_keep_idx": keep_idx_np,
+            "_new_count": 2,
+        }
+    )
 
     state = trainer.optimizers["means"].state
     expected_m = mx.concatenate([old_m[keep_idx], mx.zeros((2, 3))], axis=0)
@@ -478,8 +478,12 @@ def test_trainer_max_gaussians_cap():
     target = mx.random.uniform(shape=(32, 32, 3))
     model = GaussianModel.from_points(mx.random.normal((40, 3)) * 0.4, sh_degree=0)
     config = TrainerConfig(
-        densify_from=2, densify_every=4, densify_grad_threshold=1e-9,
-        max_gaussians=45, low_memory=True, cache_limit_gb=0.5,
+        densify_from=2,
+        densify_every=4,
+        densify_grad_threshold=1e-9,
+        max_gaussians=45,
+        low_memory=True,
+        cache_limit_gb=0.5,
     )
     trainer = GaussianTrainer(model, config)
     counts = [trainer.step(cam, target)["num_gaussians"] for _ in range(20)]

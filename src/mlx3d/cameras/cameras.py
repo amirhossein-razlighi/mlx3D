@@ -11,6 +11,8 @@ Gaussian Splatting reference implementation, so real-world datasets load
 without axis gymnastics.
 """
 
+from __future__ import annotations
+
 import math
 from dataclasses import dataclass
 
@@ -119,8 +121,15 @@ class Camera:
         if t is None:
             t = mx.zeros((3,))
         return cls(
-            R=R, t=t, fx=f, fy=f, cx=width / 2.0, cy=height / 2.0,
-            width=width, height=height, **kwargs,
+            R=R,
+            t=t,
+            fx=f,
+            fy=f,
+            cx=width / 2.0,
+            cy=height / 2.0,
+            width=width,
+            height=height,
+            **kwargs,
         )
 
     @classmethod
@@ -142,9 +151,7 @@ class Camera:
     @property
     def K(self) -> mx.array:
         """(3, 3) intrinsic matrix."""
-        return mx.array(
-            [[self.fx, 0.0, self.cx], [0.0, self.fy, self.cy], [0.0, 0.0, 1.0]]
-        )
+        return mx.array([[self.fx, 0.0, self.cx], [0.0, self.fy, self.cy], [0.0, 0.0, 1.0]])
 
     @property
     def fov_x(self) -> float:

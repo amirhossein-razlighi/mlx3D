@@ -67,3 +67,4 @@ extend-select = ["I"]
 minversion = "8.0"
 addopts = "-q"
 testpaths = ["tests"]
+pythonpath = ["src"]

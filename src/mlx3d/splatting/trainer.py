@@ -67,8 +67,9 @@ class TrainerConfig:
 class GaussianTrainer:
     """Optimizes a :class:`GaussianModel` against posed images."""
 
-    def __init__(self, model: GaussianModel, config: TrainerConfig | None = None,
-                 scene_extent: float = 1.0):
+    def __init__(
+        self, model: GaussianModel, config: TrainerConfig | None = None, scene_extent: float = 1.0
+    ):
         self.model = model
         self.config = config or TrainerConfig()
         if self.config.method not in {"vanilla", "mcmc", "2dgs"}:
@@ -170,21 +171,18 @@ class GaussianTrainer:
             self.model.apply_2dgs_constraints(thickness)
 
     # ------------------------------------------------------------------ losses
-    def _render_loss(self, params, means2d_probe, camera: Camera, target: mx.array,
-                     background: mx.array):
+    def _render_loss(
+        self, params, means2d_probe, camera: Camera, target: mx.array, background: mx.array
+    ):
         """Photometric loss; ``means2d_probe`` (zeros) exposes screen-space
         positional gradients for densification."""
-        proj = project_gaussians(
-            camera, params["means"], params["quats"], mx.exp(params["scales"])
-        )
+        proj = project_gaussians(camera, params["means"], params["quats"], mx.exp(params["scales"]))
         means2d = proj["means2d"] + means2d_probe
 
         sh = mx.concatenate([params["sh_dc"], params["sh_rest"]], axis=1)
         dirs = params["means"] - camera.camera_center
         dirs = dirs / mx.maximum(mx.linalg.norm(dirs, axis=-1, keepdims=True), 1e-8)
-        colors = mx.maximum(
-            eval_sh(self.model.active_sh_degree, sh, mx.stop_gradient(dirs)), 0.0
-        )
+        colors = mx.maximum(eval_sh(self.model.active_sh_degree, sh, mx.stop_gradient(dirs)), 0.0)
 
         sorted_ids, tile_ranges, tiles_x, tiles_y = bin_gaussians(
             means2d,
@@ -194,8 +192,16 @@ class GaussianTrainer:
             camera.height,
         )
         out = rasterize(
-            means2d, proj["conics"], colors, mx.sigmoid(params["opacities"]),
-            sorted_ids, tile_ranges, camera.width, camera.height, tiles_x, tiles_y,
+            means2d,
+            proj["conics"],
+            colors,
+            mx.sigmoid(params["opacities"]),
+            sorted_ids,
+            tile_ranges,
+            camera.width,
+            camera.height,
+            tiles_x,
+            tiles_y,
             background=background,
         )
         img = out["image"]
@@ -220,9 +226,7 @@ class GaussianTrainer:
             loss, aux = self._render_loss(params, probe, camera, target, bg)
             return loss, aux
 
-        (loss, (img, radii)), grads = mx.value_and_grad(loss_fn, argnums=(0, 1))(
-            params, probe
-        )
+        (loss, (img, radii)), grads = mx.value_and_grad(loss_fn, argnums=(0, 1))(params, probe)
         param_grads, probe_grad = grads
 
         for k, opt in self.optimizers.items():
@@ -253,10 +257,7 @@ class GaussianTrainer:
             self.grad_accum += norms * visible
             self.grad_count += visible
 
-            if (
-                self.step_count % cfg.densify_every == 0
-                and self.step_count > cfg.densify_from
-            ):
+            if self.step_count % cfg.densify_every == 0 and self.step_count > cfg.densify_from:
                 if cfg.method == "mcmc":
                     densify_result = self.model.relocate_mcmc(
                         self.grad_accum,
@@ -284,8 +285,7 @@ class GaussianTrainer:
                     self._resize_optimizer_states_after_densify(densify_result)
                 self._apply_method_constraints()
                 densify_stats = {
-                    k: v for k, v in densify_result.items()
-                    if not str(k).startswith("_")
+                    k: v for k, v in densify_result.items() if not str(k).startswith("_")
                 }
                 self._reset_grad_accum()
                 if cfg.low_memory:

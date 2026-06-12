@@ -15,6 +15,8 @@ The pair is wrapped in :func:`mx.custom_function`, so MLX autodiff chains
 the kernel gradients into the (pure-MLX) projection math upstream.
 """
 
+from __future__ import annotations
+
 import mlx.core as mx
 
 from .tiles import TILE_SIZE
@@ -290,8 +292,14 @@ _DEPTH_SRC = """
 _forward_kernel = mx.fast.metal_kernel(
     name="gs_rasterize_forward",
     input_names=[
-        "means2d", "conics", "colors", "opacities",
-        "sorted_ids", "tile_ranges", "background", "params",
+        "means2d",
+        "conics",
+        "colors",
+        "opacities",
+        "sorted_ids",
+        "tile_ranges",
+        "background",
+        "params",
     ],
     output_names=["image", "final_T", "n_contrib"],
     source=_FORWARD_SRC,
@@ -300,9 +308,18 @@ _forward_kernel = mx.fast.metal_kernel(
 _backward_kernel = mx.fast.metal_kernel(
     name="gs_rasterize_backward",
     input_names=[
-        "means2d", "conics", "colors", "opacities",
-        "sorted_ids", "tile_ranges", "background", "params",
-        "final_T", "n_contrib", "grad_image", "grad_final_T",
+        "means2d",
+        "conics",
+        "colors",
+        "opacities",
+        "sorted_ids",
+        "tile_ranges",
+        "background",
+        "params",
+        "final_T",
+        "n_contrib",
+        "grad_image",
+        "grad_final_T",
     ],
     output_names=["grad_means2d", "grad_conics", "grad_colors", "grad_opacities"],
     source=_BACKWARD_SRC,
@@ -312,8 +329,13 @@ _backward_kernel = mx.fast.metal_kernel(
 _depth_kernel = mx.fast.metal_kernel(
     name="gs_rasterize_depth",
     input_names=[
-        "means2d", "conics", "opacities", "depths",
-        "sorted_ids", "tile_ranges", "params",
+        "means2d",
+        "conics",
+        "opacities",
+        "depths",
+        "sorted_ids",
+        "tile_ranges",
+        "params",
     ],
     output_names=["depth", "final_T"],
     source=_DEPTH_SRC,
@@ -321,15 +343,15 @@ _depth_kernel = mx.fast.metal_kernel(
 
 
 @mx.custom_function
-def _rasterize_core(means2d, conics, colors, opacities, sorted_ids, tile_ranges,
-                    background, params):
+def _rasterize_core(
+    means2d, conics, colors, opacities, sorted_ids, tile_ranges, background, params
+):
     width = int(params[0].item())
     height = int(params[1].item())
     tiles_x = int(params[2].item())
     tiles_y = int(params[3].item())
     image, final_T, n_contrib = _forward_kernel(
-        inputs=[means2d, conics, colors, opacities, sorted_ids, tile_ranges,
-                background, params],
+        inputs=[means2d, conics, colors, opacities, sorted_ids, tile_ranges, background, params],
         output_shapes=[(height, width, 3), (height, width), (height, width)],
         output_dtypes=[mx.float32, mx.float32, mx.int32],
         grid=(tiles_x * TILE_SIZE, tiles_y * TILE_SIZE, 1),
@@ -341,8 +363,7 @@ def _rasterize_core(means2d, conics, colors, opacities, sorted_ids, tile_ranges,
 
 @_rasterize_core.vjp
 def _rasterize_core_vjp(primals, cotangents, outputs):
-    (means2d, conics, colors, opacities, sorted_ids, tile_ranges,
-     background, params) = primals
+    (means2d, conics, colors, opacities, sorted_ids, tile_ranges, background, params) = primals
     image, final_T, n_contrib = outputs
     grad_image = cotangents[0]
     grad_final_T = cotangents[1]
@@ -350,8 +371,20 @@ def _rasterize_core_vjp(primals, cotangents, outputs):
     tiles_y = int(params[3].item())
     N = means2d.shape[0]
     g_means2d, g_conics, g_colors, g_opacities = _backward_kernel(
-        inputs=[means2d, conics, colors, opacities, sorted_ids, tile_ranges,
-                background, params, final_T, n_contrib, grad_image, grad_final_T],
+        inputs=[
+            means2d,
+            conics,
+            colors,
+            opacities,
+            sorted_ids,
+            tile_ranges,
+            background,
+            params,
+            final_T,
+            n_contrib,
+            grad_image,
+            grad_final_T,
+        ],
         output_shapes=[(N, 2), (N, 3), (N, 3), (N,)],
         output_dtypes=[mx.float32, mx.float32, mx.float32, mx.float32],
         grid=(tiles_x * TILE_SIZE, tiles_y * TILE_SIZE, 1),

@@ -97,9 +97,7 @@ class GaussianModel:
             "means": mx.array(points),
             "scales": scales,
             "quats": quats,
-            "opacities": mx.full(
-                (N,), float(np.log(initial_opacity / (1 - initial_opacity)))
-            ),
+            "opacities": mx.full((N,), float(np.log(initial_opacity / (1 - initial_opacity)))),
             "sh_dc": rgb_to_sh(mx.array(colors))[:, None, :],
             "sh_rest": mx.zeros((N, K - 1, 3)),
         }
@@ -234,8 +232,7 @@ class GaussianModel:
     def append(self, new_params: dict[str, mx.array]) -> None:
         """Concatenate new Gaussians (in-place)."""
         self.params = {
-            k: mx.concatenate([v, new_params[k]], axis=0)
-            for k, v in self.params.items()
+            k: mx.concatenate([v, new_params[k]], axis=0) for k, v in self.params.items()
         }
 
     def densify_and_prune(
@@ -280,7 +277,11 @@ class GaussianModel:
             from ..transforms import quaternion_to_matrix
 
             q = mx.array(p_np["quats"][split_idx])
-            R = np.array(quaternion_to_matrix(q / np.linalg.norm(p_np["quats"][split_idx], axis=1, keepdims=True)))
+            R = np.array(
+                quaternion_to_matrix(
+                    q / np.linalg.norm(p_np["quats"][split_idx], axis=1, keepdims=True)
+                )
+            )
             s = scales[split_idx]
             n2 = split_idx.size * 2
             samples = np.random.normal(size=(n2, 3)) * np.repeat(s, 2, axis=0)
@@ -353,7 +354,9 @@ class GaussianModel:
         for name, arr in self.params.items():
             values = arr[src]
             if name == "means" and jitter_scale > 0:
-                values = values + mx.random.normal(values.shape) * source_scales * float(jitter_scale)
+                values = values + mx.random.normal(values.shape) * source_scales * float(
+                    jitter_scale
+                )
             elif name == "opacities":
                 values = mx.full(values.shape, reset_opacity, dtype=values.dtype)
             elif name == "scales":
