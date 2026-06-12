@@ -110,7 +110,7 @@ def render_mesh_soft(
     # Global max inverse depth from vertex depths — O(F) space, used for
     # numerical stability of the exp-based depth weighting across chunks.
     valid_verts = tri_z > camera.znear
-    if valid_verts.any():
+    if bool(valid_verts.any()):
         min_z = mx.min(mx.where(valid_verts, tri_z, mx.full(tri_z.shape, 1e9)))
         max_inv_depth = 1.0 / mx.maximum(min_z, camera.znear)
     else:
