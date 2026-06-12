@@ -19,7 +19,7 @@ import mlx.core as mx
 
 from .tiles import TILE_SIZE
 
-__all__ = ["rasterize"]
+__all__ = ["rasterize", "rasterize_depth"]
 
 _BLOCK = TILE_SIZE * TILE_SIZE  # threads per tile / batch size
 
@@ -218,6 +218,75 @@ _BACKWARD_SRC = """
     }
 """
 
+_DEPTH_SRC = """
+    constexpr int TILE = 16;
+    constexpr int BLOCK = 256;
+
+    const int width = params[0];
+    const int height = params[1];
+    const int tiles_x = params[2];
+
+    uint2 tile = threadgroup_position_in_grid.xy;
+    uint2 lid = thread_position_in_threadgroup.xy;
+    uint tidx = thread_index_in_threadgroup;
+
+    const int tile_id = tile.y * tiles_x + tile.x;
+    const int px = tile.x * TILE + lid.x;
+    const int py = tile.y * TILE + lid.y;
+    const bool inside = (px < width) && (py < height);
+    const float2 pixf = float2(px + 0.5f, py + 0.5f);
+
+    const int range_start = tile_ranges[2 * tile_id];
+    const int range_end = tile_ranges[2 * tile_id + 1];
+    const int num = range_end - range_start;
+    const int n_batches = (num + BLOCK - 1) / BLOCK;
+
+    threadgroup float2 sm_xy[BLOCK];
+    threadgroup float4 sm_co[BLOCK];
+    threadgroup float sm_depth[BLOCK];
+
+    float T = 1.0f;
+    float depth_acc = 0.0f;
+    bool done = !inside;
+
+    for (int b = 0; b < n_batches; b++) {
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        const int load = range_start + b * BLOCK + tidx;
+        if (load < range_end) {
+            const int g = sorted_ids[load];
+            sm_xy[tidx] = float2(means2d[2 * g], means2d[2 * g + 1]);
+            sm_co[tidx] = float4(conics[3 * g], conics[3 * g + 1], conics[3 * g + 2],
+                                 opacities[g]);
+            sm_depth[tidx] = depths[g];
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        if (done) continue;
+
+        const int batch_size = min(BLOCK, num - b * BLOCK);
+        for (int j = 0; j < batch_size; j++) {
+            const float2 d = sm_xy[j] - pixf;
+            const float4 co = sm_co[j];
+            const float power = -0.5f * (co.x * d.x * d.x + co.z * d.y * d.y)
+                                - co.y * d.x * d.y;
+            if (power > 0.0f) continue;
+            const float alpha = min(0.99f, co.w * metal::exp(power));
+            if (alpha < 1.0f / 255.0f) continue;
+            const float weight = alpha * T;
+            const float next_T = T * (1.0f - alpha);
+            depth_acc += sm_depth[j] * weight;
+            if (next_T < 1e-4f) { T = next_T; done = true; break; }
+            T = next_T;
+        }
+    }
+
+    if (inside) {
+        const int pid = py * width + px;
+        const float alpha = 1.0f - T;
+        depth[pid] = alpha > 1e-6f ? depth_acc / alpha : 0.0f;
+        final_T[pid] = T;
+    }
+"""
+
 _forward_kernel = mx.fast.metal_kernel(
     name="gs_rasterize_forward",
     input_names=[
@@ -238,6 +307,16 @@ _backward_kernel = mx.fast.metal_kernel(
     output_names=["grad_means2d", "grad_conics", "grad_colors", "grad_opacities"],
     source=_BACKWARD_SRC,
     atomic_outputs=True,
+)
+
+_depth_kernel = mx.fast.metal_kernel(
+    name="gs_rasterize_depth",
+    input_names=[
+        "means2d", "conics", "opacities", "depths",
+        "sorted_ids", "tile_ranges", "params",
+    ],
+    output_names=["depth", "final_T"],
+    source=_DEPTH_SRC,
 )
 
 
@@ -332,3 +411,36 @@ def rasterize(
         "final_T": final_T,
         "n_contrib": n_contrib,
     }
+
+
+def rasterize_depth(
+    means2d: mx.array,
+    conics: mx.array,
+    opacities: mx.array,
+    depths: mx.array,
+    sorted_ids: mx.array,
+    tile_ranges: mx.array,
+    width: int,
+    height: int,
+    tiles_x: int,
+    tiles_y: int,
+) -> dict[str, mx.array]:
+    """Forward-only expected depth rasterization for viewer/diagnostic modes."""
+    params = mx.array([width, height, tiles_x, tiles_y], dtype=mx.int32)
+    depth, final_T = _depth_kernel(
+        inputs=[
+            means2d.astype(mx.float32),
+            conics.astype(mx.float32),
+            opacities.astype(mx.float32),
+            depths.astype(mx.float32),
+            sorted_ids,
+            tile_ranges,
+            params,
+        ],
+        output_shapes=[(height, width), (height, width)],
+        output_dtypes=[mx.float32, mx.float32],
+        grid=(tiles_x * TILE_SIZE, tiles_y * TILE_SIZE, 1),
+        threadgroup=(TILE_SIZE, TILE_SIZE, 1),
+        init_value=0,
+    )
+    return {"depth": depth, "alpha": 1.0 - final_T, "final_T": final_T}

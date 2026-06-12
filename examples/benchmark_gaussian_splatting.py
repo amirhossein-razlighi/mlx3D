@@ -9,8 +9,13 @@ optimizing MLX/Metal kernels:
 
 import argparse
 import json
+import sys
 import time
 from pathlib import Path
+
+_SRC = Path(__file__).resolve().parents[1] / "src"
+if _SRC.exists():
+    sys.path.insert(0, str(_SRC))
 
 import mlx.core as mx
 import numpy as np
@@ -167,6 +172,15 @@ def main() -> None:
     parser.add_argument("--init-scale-max-frac", type=float, default=0.01)
     parser.add_argument("--position-lr-final", type=float, default=1.6e-6)
     parser.add_argument("--position-lr-max-steps", type=int, default=30_000)
+    parser.add_argument("--method", choices=["vanilla", "mcmc"], default="vanilla")
+    parser.add_argument("--densify-from", type=int, default=500)
+    parser.add_argument("--densify-until", type=int, default=None)
+    parser.add_argument("--densify-every", type=int, default=100)
+    parser.add_argument("--densify-grad-threshold", type=float, default=0.0002)
+    parser.add_argument("--mcmc-relocate-frac", type=float, default=0.02)
+    parser.add_argument("--mcmc-min-opacity", type=float, default=0.01)
+    parser.add_argument("--mcmc-jitter-scale", type=float, default=0.25)
+    parser.add_argument("--mcmc-noise-scale", type=float, default=0.01)
     parser.add_argument("--max-gaussians", type=int, default=None)
     parser.add_argument("--save-render", type=str, default=None)
     args = parser.parse_args()
@@ -224,8 +238,16 @@ def main() -> None:
     }
 
     config = TrainerConfig(
+        method=args.method,
         white_background=white_bg,
-        densify_until=max(args.steps // 2, 0),
+        densify_from=args.densify_from,
+        densify_until=args.densify_until if args.densify_until is not None else max(args.steps // 2, 0),
+        densify_every=args.densify_every,
+        densify_grad_threshold=args.densify_grad_threshold,
+        mcmc_relocate_frac=args.mcmc_relocate_frac,
+        mcmc_min_opacity=args.mcmc_min_opacity,
+        mcmc_jitter_scale=args.mcmc_jitter_scale,
+        mcmc_noise_scale=args.mcmc_noise_scale,
         max_gaussians=args.max_gaussians,
         low_memory=args.low_mem,
         lr_means_final=args.position_lr_final,
@@ -235,6 +257,7 @@ def main() -> None:
     order = np.random.permutation(len(ds))
     step_times = []
     losses = []
+    densify_events = []
     total_steps = args.warmup + args.steps
     for i in range(total_steps):
         cam, target = ds[int(order[i % len(ds)])]
@@ -245,6 +268,8 @@ def main() -> None:
         if i >= args.warmup:
             step_times.append(dt)
             losses.append(float(info["loss"]))
+            if info["densify"] is not None:
+                densify_events.append({"step": int(info["step"]), **info["densify"]})
 
     t0 = time.perf_counter()
     final = model.render(cam0, background=bg)
@@ -272,6 +297,15 @@ def main() -> None:
             "scale_init_max_scale": scale_cap,
             "position_lr_final": args.position_lr_final,
             "position_lr_max_steps": args.position_lr_max_steps,
+            "method": args.method,
+            "densify_from": args.densify_from,
+            "densify_until": config.densify_until,
+            "densify_every": args.densify_every,
+            "densify_grad_threshold": args.densify_grad_threshold,
+            "mcmc_relocate_frac": args.mcmc_relocate_frac,
+            "mcmc_min_opacity": args.mcmc_min_opacity,
+            "mcmc_jitter_scale": args.mcmc_jitter_scale,
+            "mcmc_noise_scale": args.mcmc_noise_scale,
         },
         "timings": timings,
         "train": {
@@ -282,6 +316,7 @@ def main() -> None:
             "loss_last": losses[-1] if losses else None,
             "lr_means": trainer.learning_rates()["means"],
             "gaussians": int(model.num_gaussians),
+            "densify_events": densify_events,
         },
         "initial": initial_stats,
         "final": {

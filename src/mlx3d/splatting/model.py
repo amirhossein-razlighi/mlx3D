@@ -5,7 +5,7 @@ import numpy as np
 
 from ..cameras import Camera
 from ..io import load_ply, save_ply
-from .render import render_gaussians
+from .render import render_gaussian_depth, render_gaussians
 from .sh import num_sh_bases, rgb_to_sh
 
 __all__ = ["GaussianModel"]
@@ -138,6 +138,15 @@ class GaussianModel:
             background=background,
         )
 
+    def render_depth(self, camera: Camera) -> dict:
+        return render_gaussian_depth(
+            camera,
+            self.params["means"],
+            self.params["quats"],
+            self.scales_act,
+            self.opacities_act,
+        )
+
     def one_up_sh_degree(self) -> None:
         if self.active_sh_degree < self.sh_degree:
             self.active_sh_degree += 1
@@ -220,7 +229,8 @@ class GaussianModel:
         scene_extent: float = 1.0,
         percent_dense: float = 0.01,
         min_opacity: float = 0.005,
-    ) -> dict[str, int]:
+        return_optimizer_state: bool = False,
+    ) -> dict[str, object]:
         """Adaptive density control from the 3DGS paper.
 
         Args:
@@ -273,11 +283,66 @@ class GaussianModel:
         if split_idx.size > 0:
             self.append({k: mx.array(v) for k, v in splits.items()})
 
-        return {
+        stats: dict[str, object] = {
             "cloned": int(clone_idx.size),
             "split": int(split_idx.size),
             "pruned": int(prune_mask.sum()),
         }
+        if return_optimizer_state:
+            stats["_keep_idx"] = keep_idx.astype(np.int32)
+            stats["_new_count"] = int(clone_idx.size + 2 * split_idx.size)
+        return stats
+
+    def relocate_mcmc(
+        self,
+        grad_accum: mx.array,
+        grad_count: mx.array,
+        relocate_frac: float = 0.02,
+        min_opacity: float = 0.01,
+        jitter_scale: float = 0.25,
+    ) -> dict[str, object]:
+        """Fixed-budget MCMC-style relocation of underused Gaussians.
+
+        This keeps ``N`` constant: low-opacity or never-visible rows are
+        replaced by jittered copies of high-gradient rows. It is inspired by
+        MCMC 3DGS relocation, and is intended as an alternative to vanilla
+        clone/split/prune density control.
+        """
+        n = self.num_gaussians
+        max_relocate = int(max(0, min(relocate_frac, 1.0)) * n)
+        if max_relocate <= 0 or n <= 1:
+            return {"relocated": 0}
+
+        avg_grad = np.array(grad_accum) / np.maximum(np.array(grad_count), 1.0)
+        counts = np.array(grad_count)
+        p_np = {k: np.array(v) for k, v in self.params.items()}
+        opac = 1.0 / (1.0 + np.exp(-np.clip(p_np["opacities"], -50.0, 50.0)))
+        underused = (opac < min_opacity) | (counts <= 0)
+        target_idx = np.where(underused)[0]
+        if target_idx.size == 0:
+            target_idx = np.argsort(opac)[:max_relocate]
+        elif target_idx.size > max_relocate:
+            target_idx = target_idx[np.argsort(opac[target_idx])[:max_relocate]]
+
+        source_pool = np.setdiff1d(np.arange(n), target_idx, assume_unique=False)
+        if source_pool.size == 0:
+            return {"relocated": 0}
+        k = min(target_idx.size, source_pool.size)
+        if k == 0:
+            return {"relocated": 0}
+        source_idx = source_pool[np.argsort(avg_grad[source_pool])[-k:]]
+        target_idx = target_idx[:k]
+
+        scales = np.exp(p_np["scales"][source_idx])
+        for name, arr in p_np.items():
+            arr[target_idx] = arr[source_idx]
+        if jitter_scale > 0:
+            offsets = np.random.normal(size=(k, 3)).astype(np.float32) * scales * float(jitter_scale)
+            p_np["means"][target_idx] = p_np["means"][target_idx] + offsets
+        p_np["opacities"][target_idx] = float(np.log(0.05 / 0.95))
+        p_np["scales"][target_idx] = p_np["scales"][target_idx] - float(np.log(1.6))
+        self.params = {name: mx.array(arr) for name, arr in p_np.items()}
+        return {"relocated": int(k), "_moved_idx": target_idx.astype(np.int32)}
 
     def reset_opacities(self, max_opacity: float = 0.01) -> None:
         """Clamp opacities down (periodic reset from the 3DGS paper)."""
