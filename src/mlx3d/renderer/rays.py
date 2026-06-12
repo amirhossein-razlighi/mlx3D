@@ -1,5 +1,7 @@
 """Ray sampling and differentiable volume rendering (the NeRF machinery)."""
 
+from __future__ import annotations
+
 import mlx.core as mx
 
 __all__ = [
@@ -109,9 +111,7 @@ def volume_render(
         ``weights`` (R, S).
     """
     deltas = t_vals[:, 1:] - t_vals[:, :-1]
-    deltas = mx.concatenate(
-        [deltas, mx.full(deltas[:, :1].shape, 1e10)], axis=-1
-    )  # (R, S)
+    deltas = mx.concatenate([deltas, mx.full(deltas[:, :1].shape, 1e10)], axis=-1)  # (R, S)
     if directions is not None:
         deltas = deltas * mx.linalg.norm(directions, axis=-1, keepdims=True)
 

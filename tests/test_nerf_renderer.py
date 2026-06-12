@@ -2,7 +2,7 @@ import mlx.core as mx
 import numpy as np
 
 from mlx3d.cameras import Camera
-from mlx3d.nn import NeRF, PositionalEncoding, render_rays
+from mlx3d.nn import HashGridEncoding, NeRF, PositionalEncoding, render_rays
 from mlx3d.renderer import render_points, sample_along_rays, sample_pdf, volume_render
 
 
@@ -16,6 +16,57 @@ def test_positional_encoding_shapes_and_values():
     out = pe(x)
     assert out.shape == (10, 3 * (2 * 4 + 1))
     assert_close(out[:, :3], x)
+
+
+def test_hash_grid_encoding_shape_and_gradients():
+    enc = HashGridEncoding(
+        num_levels=3,
+        features_per_level=2,
+        log2_hashmap_size=5,
+        base_resolution=4,
+        finest_resolution=16,
+    )
+    x = mx.random.uniform(shape=(8, 3), low=-1.0, high=1.0)
+    out = enc(x)
+    assert out.shape == (8, 6)
+
+    def loss_fn(points):
+        return mx.sum(enc(points) ** 2)
+
+    grad = mx.grad(loss_fn)(x)
+    assert not bool(mx.isnan(grad).any())
+
+
+def test_hash_grid_table_params_are_trainable():
+    """Hash-grid tables must receive gradients via nn.value_and_grad."""
+    import mlx.nn as nn
+
+    enc = HashGridEncoding(
+        num_levels=4,
+        features_per_level=2,
+        log2_hashmap_size=6,
+        base_resolution=4,
+        finest_resolution=32,
+    )
+    x = mx.random.uniform(shape=(16, 3), low=-1.0, high=1.0)
+    target = mx.zeros((16, 8))
+
+    def loss_fn(model):
+        return mx.mean((model(x) - target) ** 2)
+
+    # Confirm tables are in parameters()
+    params = enc.parameters()
+    assert "tables" in params, "HashGridEncoding.tables missing from parameters()"
+    assert len(params["tables"]) == 4
+
+    loss, grads = nn.value_and_grad(enc, loss_fn)(enc)
+    mx.eval(grads)
+    table_grads = grads["tables"]
+    assert len(table_grads) == 4
+    for i, g in enumerate(table_grads):
+        assert g is not None, f"table[{i}] gradient is None"
+        assert not bool(mx.isnan(g).any()), f"NaN in table[{i}] gradient"
+        assert float(mx.abs(g).max()) > 0, f"table[{i}] gradient is all zeros"
 
 
 def test_sample_along_rays():

@@ -1,5 +1,7 @@
 """Chamfer distance between point clouds."""
 
+from __future__ import annotations
+
 import mlx.core as mx
 
 from ..ops.knn import knn_points

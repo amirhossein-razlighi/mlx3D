@@ -86,9 +86,9 @@ _knn3d_smallk_kernel = mx.fast.metal_kernel(
 
 def _pairwise_sqdist(a: mx.array, b: mx.array) -> mx.array:
     """Squared euclidean distances between ``a`` (..., P1, D) and ``b`` (..., P2, D)."""
-    a2 = mx.sum(a * a, axis=-1, keepdims=True)            # (..., P1, 1)
-    b2 = mx.sum(b * b, axis=-1, keepdims=True)            # (..., P2, 1)
-    cross = a @ b.swapaxes(-1, -2)                        # (..., P1, P2)
+    a2 = mx.sum(a * a, axis=-1, keepdims=True)  # (..., P1, 1)
+    b2 = mx.sum(b * b, axis=-1, keepdims=True)  # (..., P2, 1)
+    cross = a @ b.swapaxes(-1, -2)  # (..., P1, P2)
     d = a2 - 2.0 * cross + b2.swapaxes(-1, -2)
     return mx.maximum(d, 0.0)
 

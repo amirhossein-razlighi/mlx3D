@@ -1,4 +1,3 @@
-
 import mlx.core as mx
 import numpy as np
 
@@ -10,7 +9,7 @@ from mlx3d.losses import (
     psnr,
     ssim,
 )
-from mlx3d.ops import knn_gather, knn_points, sample_points_from_meshes
+from mlx3d.ops import knn_gather, knn_points, marching_cubes, sample_points_from_meshes
 from mlx3d.utils import cube, ico_sphere, torus
 
 
@@ -98,6 +97,24 @@ def test_sample_points_on_sphere():
     assert_close(norm_len, mx.ones((2000,)), atol=1e-4)
 
 
+def test_marching_cubes_extracts_sphere_mesh():
+    xs = np.linspace(-1.0, 1.0, 12)
+    zz, yy, xx = np.meshgrid(xs, xs, xs, indexing="ij")
+    sdf = xx * xx + yy * yy + zz * zz - 0.45
+    mesh = marching_cubes(
+        mx.array(sdf),
+        level=0.0,
+        spacing=(2 / 11, 2 / 11, 2 / 11),
+        origin=(-1, -1, -1),
+    )
+    verts = mesh.verts_packed()
+    faces = mesh.faces_packed()
+    assert verts.shape[0] > 0
+    assert faces.shape[0] > 0
+    r = mx.linalg.norm(verts, axis=-1)
+    assert 0.45 < float(r.mean()) < 0.85
+
+
 def test_mesh_losses_on_primitives():
     sphere = ico_sphere(level=1)
     e = mesh_edge_loss(sphere)
@@ -119,11 +136,7 @@ def test_mesh_loss_gradients():
         from mlx3d.structures import Meshes
 
         m = Meshes([verts], faces)
-        return (
-            mesh_edge_loss(m)
-            + mesh_laplacian_smoothing(m)
-            + mesh_normal_consistency(m)
-        )
+        return mesh_edge_loss(m) + mesh_laplacian_smoothing(m) + mesh_normal_consistency(m)
 
     g = mx.grad(f)(sphere.verts_packed())
     assert not bool(mx.isnan(g).any())

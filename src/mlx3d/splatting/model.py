@@ -5,7 +5,7 @@ import numpy as np
 
 from ..cameras import Camera
 from ..io import load_ply, save_ply
-from .render import render_gaussians
+from .render import render_gaussian_depth, render_gaussians
 from .sh import num_sh_bases, rgb_to_sh
 
 __all__ = ["GaussianModel"]
@@ -97,9 +97,7 @@ class GaussianModel:
             "means": mx.array(points),
             "scales": scales,
             "quats": quats,
-            "opacities": mx.full(
-                (N,), float(np.log(initial_opacity / (1 - initial_opacity)))
-            ),
+            "opacities": mx.full((N,), float(np.log(initial_opacity / (1 - initial_opacity)))),
             "sh_dc": rgb_to_sh(mx.array(colors))[:, None, :],
             "sh_rest": mx.zeros((N, K - 1, 3)),
         }
@@ -125,6 +123,23 @@ class GaussianModel:
     def sh(self) -> mx.array:
         return mx.concatenate([self.params["sh_dc"], self.params["sh_rest"]], axis=1)
 
+    def apply_2dgs_constraints(self, max_thickness: float) -> None:
+        """Constrain Gaussians to thin surfels for 2DGS-style training.
+
+        The covariance projection and rasterizer already support anisotropic
+        oriented Gaussians. Keeping the third local scale small turns each
+        Gaussian into an oriented disk while preserving standard 3DGS PLY
+        compatibility.
+        """
+        thickness = max(float(max_thickness), 1e-8)
+        max_log_thickness = float(np.log(thickness))
+        constrained = self.params["scales"]
+        z = mx.minimum(
+            constrained[:, 2:3],
+            mx.full((self.num_gaussians, 1), max_log_thickness, dtype=constrained.dtype),
+        )
+        self.params["scales"] = mx.concatenate([constrained[:, :2], z], axis=1)
+
     # ------------------------------------------------------------------ render
     def render(self, camera: Camera, background: mx.array | None = None) -> dict:
         return render_gaussians(
@@ -136,6 +151,15 @@ class GaussianModel:
             sh=self.sh,
             sh_degree=self.active_sh_degree,
             background=background,
+        )
+
+    def render_depth(self, camera: Camera) -> dict:
+        return render_gaussian_depth(
+            camera,
+            self.params["means"],
+            self.params["quats"],
+            self.scales_act,
+            self.opacities_act,
         )
 
     def one_up_sh_degree(self) -> None:
@@ -208,8 +232,7 @@ class GaussianModel:
     def append(self, new_params: dict[str, mx.array]) -> None:
         """Concatenate new Gaussians (in-place)."""
         self.params = {
-            k: mx.concatenate([v, new_params[k]], axis=0)
-            for k, v in self.params.items()
+            k: mx.concatenate([v, new_params[k]], axis=0) for k, v in self.params.items()
         }
 
     def densify_and_prune(
@@ -220,7 +243,8 @@ class GaussianModel:
         scene_extent: float = 1.0,
         percent_dense: float = 0.01,
         min_opacity: float = 0.005,
-    ) -> dict[str, int]:
+        return_optimizer_state: bool = False,
+    ) -> dict[str, object]:
         """Adaptive density control from the 3DGS paper.
 
         Args:
@@ -253,7 +277,11 @@ class GaussianModel:
             from ..transforms import quaternion_to_matrix
 
             q = mx.array(p_np["quats"][split_idx])
-            R = np.array(quaternion_to_matrix(q / np.linalg.norm(p_np["quats"][split_idx], axis=1, keepdims=True)))
+            R = np.array(
+                quaternion_to_matrix(
+                    q / np.linalg.norm(p_np["quats"][split_idx], axis=1, keepdims=True)
+                )
+            )
             s = scales[split_idx]
             n2 = split_idx.size * 2
             samples = np.random.normal(size=(n2, 3)) * np.repeat(s, 2, axis=0)
@@ -273,11 +301,66 @@ class GaussianModel:
         if split_idx.size > 0:
             self.append({k: mx.array(v) for k, v in splits.items()})
 
-        return {
+        stats: dict[str, object] = {
             "cloned": int(clone_idx.size),
             "split": int(split_idx.size),
             "pruned": int(prune_mask.sum()),
         }
+        if return_optimizer_state:
+            stats["_keep_idx"] = keep_idx.astype(np.int32)
+            stats["_new_count"] = int(clone_idx.size + 2 * split_idx.size)
+        return stats
+
+    def relocate_mcmc(
+        self,
+        grad_accum: mx.array,
+        grad_count: mx.array,
+        relocate_frac: float = 0.02,
+        min_opacity: float = 0.01,
+        jitter_scale: float = 0.25,
+    ) -> dict[str, object]:
+        """Fixed-budget MCMC-style relocation of underused Gaussians.
+
+        This keeps ``N`` constant: low-opacity or never-visible rows are
+        replaced by jittered copies of high-gradient rows. It is inspired by
+        MCMC 3DGS relocation, and is intended as an alternative to vanilla
+        clone/split/prune density control.
+        """
+        n = self.num_gaussians
+        max_relocate = int(max(0, min(relocate_frac, 1.0)) * n)
+        if max_relocate <= 0 or n <= 1:
+            return {"relocated": 0}
+
+        avg_grad = grad_accum / mx.maximum(grad_count, 1.0)
+        opac = mx.sigmoid(self.params["opacities"])
+        counts = grad_count
+        underused = (opac < min_opacity) | (counts <= 0)
+        underused_count = int(mx.sum(underused.astype(mx.int32)))
+        k = max_relocate if underused_count == 0 else min(max_relocate, underused_count)
+        k = min(k, n - 1)
+        if k == 0:
+            return {"relocated": 0}
+
+        # Prefer underused rows. If none exist, fall back to the lowest-opacity
+        target_score = mx.where(underused, 2.0 - opac, -opac)
+        dst = mx.argpartition(-target_score, kth=k - 1)[:k]
+        source_score = avg_grad.at[dst].add(-1e30 - avg_grad[dst])
+        src = mx.argpartition(-source_score, kth=k - 1)[:k]
+        source_scales = mx.exp(self.params["scales"][src])
+        reset_opacity = float(np.log(0.05 / 0.95))
+        split_shrink = float(np.log(1.6))
+        for name, arr in self.params.items():
+            values = arr[src]
+            if name == "means" and jitter_scale > 0:
+                values = values + mx.random.normal(values.shape) * source_scales * float(
+                    jitter_scale
+                )
+            elif name == "opacities":
+                values = mx.full(values.shape, reset_opacity, dtype=values.dtype)
+            elif name == "scales":
+                values = values - split_shrink
+            self.params[name] = arr.at[dst].add(values - arr[dst])
+        return {"relocated": int(k), "_moved_idx": dst}
 
     def reset_opacities(self, max_opacity: float = 0.01) -> None:
         """Clamp opacities down (periodic reset from the 3DGS paper)."""

@@ -6,8 +6,8 @@ repo_name: mlx3D
 
 theme:
   name: material
-  logo: assets/logo.jpeg
-  favicon: assets/logo.jpeg
+  logo: assets/mlx3d-icon.png
+  favicon: assets/mlx3d-icon.png
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -62,10 +62,13 @@ nav:
       - Quickstart: quickstart.md
       - Conventions: conventions.md
       - Interactive Viewer: viewer.md
+      - Release: release.md
   - Tutorials:
       - Mesh Optimization: tutorials/mesh_optimization.md
+      - Mesh Rendering and Extraction: tutorials/mesh_rendering.md
       - Point Cloud Fitting: tutorials/pointcloud_fitting.md
       - "NeRF: Neural Radiance Fields": tutorials/nerf.md
+      - Hash-Grid NeRF Encodings: tutorials/hashgrid_nerf.md
       - Gaussian Splatting: tutorials/gaussian_splatting.md
   - API Reference:
       - Structures: api/structures.md

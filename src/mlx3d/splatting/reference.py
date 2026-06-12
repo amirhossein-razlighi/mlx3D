@@ -29,7 +29,10 @@ def render_gaussians_reference(
 
     proj = project_gaussians(camera, means, quats, scales)
     means2d, conics, depths, radii = (
-        proj["means2d"], proj["conics"], proj["depths"], proj["radii"],
+        proj["means2d"],
+        proj["conics"],
+        proj["depths"],
+        proj["radii"],
     )
 
     # Depth-sort all Gaussians (global front-to-back order).
