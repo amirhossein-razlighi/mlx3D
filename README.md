@@ -80,7 +80,8 @@ Contributions are welcome — file an issue to get started.
 - [ ] Textured mesh rendering (`.mtl`, UV textures)
 - [x] Optimizer-state-preserving densification for 3DGS
 - [x] Configurable 3DGS training method with vanilla default and MCMC-style fixed-budget relocation
-- [ ] 2DGS / surfel-style Gaussian method with geometry losses
+- [x] 2DGS / surfel-style Gaussian mode with local-normal thickness constraints
+- [ ] 2DGS geometry losses and surface extraction refinements
 - [ ] Additional well-known splatting recipes (anti-aliasing, compression, 3DGUT-style variants)
 - [x] Viewer depth-map mode for Gaussian checkpoints
 - [x] Viewer mesh-style inspection with GPU-efficient depth contours

@@ -125,6 +125,23 @@ class GaussianModel:
     def sh(self) -> mx.array:
         return mx.concatenate([self.params["sh_dc"], self.params["sh_rest"]], axis=1)
 
+    def apply_2dgs_constraints(self, max_thickness: float) -> None:
+        """Constrain Gaussians to thin surfels for 2DGS-style training.
+
+        The covariance projection and rasterizer already support anisotropic
+        oriented Gaussians. Keeping the third local scale small turns each
+        Gaussian into an oriented disk while preserving standard 3DGS PLY
+        compatibility.
+        """
+        thickness = max(float(max_thickness), 1e-8)
+        max_log_thickness = float(np.log(thickness))
+        constrained = self.params["scales"]
+        z = mx.minimum(
+            constrained[:, 2:3],
+            mx.full((self.num_gaussians, 1), max_log_thickness, dtype=constrained.dtype),
+        )
+        self.params["scales"] = mx.concatenate([constrained[:, :2], z], axis=1)
+
     # ------------------------------------------------------------------ render
     def render(self, camera: Camera, background: mx.array | None = None) -> dict:
         return render_gaussians(
@@ -313,36 +330,36 @@ class GaussianModel:
         if max_relocate <= 0 or n <= 1:
             return {"relocated": 0}
 
-        avg_grad = np.array(grad_accum) / np.maximum(np.array(grad_count), 1.0)
-        counts = np.array(grad_count)
-        p_np = {k: np.array(v) for k, v in self.params.items()}
-        opac = 1.0 / (1.0 + np.exp(-np.clip(p_np["opacities"], -50.0, 50.0)))
+        avg_grad = grad_accum / mx.maximum(grad_count, 1.0)
+        opac = mx.sigmoid(self.params["opacities"])
+        counts = grad_count
         underused = (opac < min_opacity) | (counts <= 0)
-        target_idx = np.where(underused)[0]
-        if target_idx.size == 0:
-            target_idx = np.argsort(opac)[:max_relocate]
-        elif target_idx.size > max_relocate:
-            target_idx = target_idx[np.argsort(opac[target_idx])[:max_relocate]]
-
-        source_pool = np.setdiff1d(np.arange(n), target_idx, assume_unique=False)
-        if source_pool.size == 0:
-            return {"relocated": 0}
-        k = min(target_idx.size, source_pool.size)
+        underused_count = int(mx.sum(underused.astype(mx.int32)))
+        k = max_relocate if underused_count == 0 else min(max_relocate, underused_count)
+        k = min(k, n - 1)
         if k == 0:
             return {"relocated": 0}
-        source_idx = source_pool[np.argsort(avg_grad[source_pool])[-k:]]
-        target_idx = target_idx[:k]
 
-        scales = np.exp(p_np["scales"][source_idx])
-        for name, arr in p_np.items():
-            arr[target_idx] = arr[source_idx]
-        if jitter_scale > 0:
-            offsets = np.random.normal(size=(k, 3)).astype(np.float32) * scales * float(jitter_scale)
-            p_np["means"][target_idx] = p_np["means"][target_idx] + offsets
-        p_np["opacities"][target_idx] = float(np.log(0.05 / 0.95))
-        p_np["scales"][target_idx] = p_np["scales"][target_idx] - float(np.log(1.6))
-        self.params = {name: mx.array(arr) for name, arr in p_np.items()}
-        return {"relocated": int(k), "_moved_idx": target_idx.astype(np.int32)}
+        # Prefer underused rows. If none exist, fall back to the lowest-opacity
+        # rows. Keep this selection on MLX arrays; only the scalar count above
+        # synchronizes to Python.
+        target_score = mx.where(underused, 2.0 - opac, -opac)
+        dst = mx.argpartition(-target_score, k)[:k]
+        source_score = avg_grad.at[dst].add(-1e30 - avg_grad[dst])
+        src = mx.argpartition(-source_score, k)[:k]
+        source_scales = mx.exp(self.params["scales"][src])
+        reset_opacity = float(np.log(0.05 / 0.95))
+        split_shrink = float(np.log(1.6))
+        for name, arr in self.params.items():
+            values = arr[src]
+            if name == "means" and jitter_scale > 0:
+                values = values + mx.random.normal(values.shape) * source_scales * float(jitter_scale)
+            elif name == "opacities":
+                values = mx.full(values.shape, reset_opacity, dtype=values.dtype)
+            elif name == "scales":
+                values = values - split_shrink
+            self.params[name] = arr.at[dst].add(values - arr[dst])
+        return {"relocated": int(k), "_moved_idx": dst}
 
     def reset_opacities(self, max_opacity: float = 0.01) -> None:
         """Clamp opacities down (periodic reset from the 3DGS paper)."""
