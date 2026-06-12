@@ -50,7 +50,7 @@ def sample_texture(texture: mx.array, uv: mx.array) -> mx.array:
 
 def render_mesh_soft(
     camera: Camera,
-    mesh_or_verts,
+    mesh_or_verts: Meshes | mx.array,
     faces: mx.array | None = None,
     verts_colors: mx.array | None = None,
     face_colors: mx.array | None = None,
