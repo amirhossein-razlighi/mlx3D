@@ -245,6 +245,18 @@ def test_model_from_points_caps_initial_scale():
     assert float(mx.exp(model.params["scales"]).max()) <= 0.250001
 
 
+def test_model_2dgs_constraints_clamp_local_normal_scale():
+    pts = mx.random.normal((12, 3))
+    model = GaussianModel.from_points(pts, sh_degree=0)
+    model.params["scales"] = mx.log(mx.full((model.num_gaussians, 3), 0.5))
+
+    model.apply_2dgs_constraints(max_thickness=0.01)
+
+    scales = np.array(mx.exp(model.params["scales"]))
+    assert np.all(scales[:, 2] <= 0.010001)
+    np.testing.assert_allclose(scales[:, :2], 0.5, atol=1e-6)
+
+
 def test_model_ply_roundtrip(tmp_path):
     pts = mx.random.normal((20, 3))
     model = GaussianModel.from_points(pts, sh_degree=2)
@@ -429,6 +441,35 @@ def test_trainer_mcmc_relocation_keeps_count_and_resets_moments():
     assert event["relocated"] > 0
     state = trainer.optimizers["means"].state["means"]
     assert np.isfinite(np.array(state["m"])).all()
+
+
+def test_trainer_2dgs_keeps_surfel_thickness_after_densify():
+    mx.random.seed(14)
+    cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), width=32, height=32)
+    target = mx.random.uniform(shape=(32, 32, 3))
+    model = GaussianModel.from_points(mx.random.normal((40, 3)) * 0.4, sh_degree=0)
+    trainer = GaussianTrainer(
+        model,
+        TrainerConfig(
+            method="2dgs",
+            two_d_thickness=1e-3,
+            densify_from=1,
+            densify_every=2,
+            densify_grad_threshold=1e-9,
+        ),
+        scene_extent=2.0,
+    )
+
+    event = None
+    for _ in range(4):
+        info = trainer.step(cam, target)
+        if info["densify"] is not None:
+            event = info["densify"]
+
+    assert event is not None
+    scales = np.array(mx.exp(model.params["scales"]))
+    assert np.all(scales[:, 2] <= 0.002001)
+    assert trainer.grad_accum.shape == (model.num_gaussians,)
 
 
 def test_trainer_max_gaussians_cap():

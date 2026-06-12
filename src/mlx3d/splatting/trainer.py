@@ -26,7 +26,7 @@ __all__ = ["TrainerConfig", "GaussianTrainer"]
 @dataclass
 class TrainerConfig:
     method: str = "vanilla"
-    """Density/optimization strategy: ``vanilla`` or ``mcmc``."""
+    """Training strategy: ``vanilla``, ``mcmc``, or ``2dgs``."""
     lr_means: float = 1.6e-4
     lr_means_final: float = 1.6e-6
     lr_means_max_steps: int = 30_000
@@ -49,6 +49,8 @@ class TrainerConfig:
     """Relocated copies are jittered by this multiple of their source scale."""
     mcmc_noise_scale: float = 0.01
     """Per-step SGLD-like xyz noise scale used in MCMC mode."""
+    two_d_thickness: float = 1e-4
+    """2DGS local-normal thickness as a fraction of scene extent."""
     opacity_reset_every: int = 3000
     sh_increase_every: int = 1000
     white_background: bool = False
@@ -69,8 +71,8 @@ class GaussianTrainer:
                  scene_extent: float = 1.0):
         self.model = model
         self.config = config or TrainerConfig()
-        if self.config.method not in {"vanilla", "mcmc"}:
-            raise ValueError("TrainerConfig.method must be 'vanilla' or 'mcmc'")
+        if self.config.method not in {"vanilla", "mcmc", "2dgs"}:
+            raise ValueError("TrainerConfig.method must be 'vanilla', 'mcmc', or '2dgs'")
         self.scene_extent = scene_extent
         self.step_count = 0
         if self.config.low_memory:
@@ -78,6 +80,7 @@ class GaussianTrainer:
             # (densification changes N every 100 steps) the cache can grow
             # by gigabytes. Cap it, and clear at densification events below.
             mx.set_cache_limit(int(self.config.cache_limit_gb * (1 << 30)))
+        self._apply_method_constraints()
         self._build_optimizers()
         self._reset_grad_accum()
 
@@ -144,9 +147,13 @@ class GaussianTrainer:
     def _zero_optimizer_state_rows(self, idx_np) -> None:
         if idx_np is None:
             return
-        idx = list(map(int, idx_np))
-        if not idx:
+        if idx_np.shape[0] == 0:
             return
+        idx = (
+            idx_np.astype(mx.int32)
+            if isinstance(idx_np, mx.array)
+            else mx.array(np.asarray(idx_np, dtype=np.int32))
+        )
         for name, opt in self.optimizers.items():
             state = opt.state.get(name)
             if not isinstance(state, dict):
@@ -155,9 +162,12 @@ class GaussianTrainer:
                 old = state.get(slot)
                 if old is None:
                     continue
-                arr_np = np.array(old)
-                arr_np[idx] = 0
-                state[slot] = mx.array(arr_np)
+                state[slot] = old.at[idx].add(-old[idx])
+
+    def _apply_method_constraints(self) -> None:
+        if self.config.method == "2dgs":
+            thickness = self.config.two_d_thickness * max(float(self.scene_extent), 1e-8)
+            self.model.apply_2dgs_constraints(thickness)
 
     # ------------------------------------------------------------------ losses
     def _render_loss(self, params, means2d_probe, camera: Camera, target: mx.array,
@@ -227,6 +237,7 @@ class GaussianTrainer:
                     self.model.params["means"]
                     + mx.random.normal(self.model.params["means"].shape) * sigma
                 )
+        self._apply_method_constraints()
         # Release gradient references before evaluating so their buffers can
         # be recycled within the same step (see the MLX performance guide).
         del param_grads, grads
@@ -271,6 +282,7 @@ class GaussianTrainer:
                         return_optimizer_state=True,
                     )
                     self._resize_optimizer_states_after_densify(densify_result)
+                self._apply_method_constraints()
                 densify_stats = {
                     k: v for k, v in densify_result.items()
                     if not str(k).startswith("_")

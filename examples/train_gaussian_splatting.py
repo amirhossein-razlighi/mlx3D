@@ -92,6 +92,8 @@ def main() -> None:
     parser.add_argument("--data", type=str, required=True)
     parser.add_argument("--format", choices=["colmap", "blender"], default="colmap")
     parser.add_argument("--iters", type=int, default=7000)
+    parser.add_argument("--seed", type=int, default=0,
+                        help="random seed for reproducible init/order; <0 disables seeding")
     parser.add_argument("--downscale", type=int, default=1)
     parser.add_argument("--sh-degree", type=int, default=3)
     parser.add_argument("--init-points", type=int, default=30000,
@@ -117,7 +119,7 @@ def main() -> None:
                         help="final unscaled xyz learning rate for exponential decay")
     parser.add_argument("--position-lr-max-steps", type=int, default=30_000,
                         help="steps over which xyz learning rate decays")
-    parser.add_argument("--method", choices=["vanilla", "mcmc"], default="vanilla",
+    parser.add_argument("--method", choices=["vanilla", "mcmc", "2dgs"], default="vanilla",
                         help="training strategy; vanilla 3DGS is the default")
     parser.add_argument("--densify-from", type=int, default=500,
                         help="first iteration that accumulates densification stats")
@@ -135,6 +137,8 @@ def main() -> None:
                         help="MCMC mode: relocation jitter as a multiple of source scale")
     parser.add_argument("--mcmc-noise-scale", type=float, default=0.01,
                         help="MCMC mode: per-step SGLD-like xyz noise scale")
+    parser.add_argument("--2d-thickness", dest="two_d_thickness", type=float, default=1e-4,
+                        help="2DGS mode: local-normal thickness as a fraction of scene extent")
     parser.add_argument("--cache-limit-gb", type=float, default=2.0,
                         help="MLX buffer-cache cap used with --low-mem")
     parser.add_argument("--log-every", type=int, default=10,
@@ -160,6 +164,9 @@ def main() -> None:
     parser.add_argument("--viewer-keep-open", action="store_true",
                         help="keep the process alive after training so the viewer stays open")
     args = parser.parse_args()
+    if args.seed >= 0:
+        np.random.seed(args.seed)
+        mx.random.seed(args.seed)
 
     image_cache = args.image_cache or ("uint8" if args.low_mem else "ram")
     max_gaussians = args.max_gaussians or (1_200_000 if args.low_mem else None)
@@ -241,6 +248,7 @@ def main() -> None:
         mcmc_min_opacity=args.mcmc_min_opacity,
         mcmc_jitter_scale=args.mcmc_jitter_scale,
         mcmc_noise_scale=args.mcmc_noise_scale,
+        two_d_thickness=args.two_d_thickness,
         max_gaussians=max_gaussians,
         low_memory=args.low_mem,
         cache_limit_gb=args.cache_limit_gb,

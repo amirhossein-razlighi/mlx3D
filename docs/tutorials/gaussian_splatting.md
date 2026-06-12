@@ -117,6 +117,12 @@ density-control events, Adam moments for moved rows are reset, and optional
 SGLD-like xyz noise is controlled with `--mcmc-noise-scale`. Useful knobs are
 `--mcmc-relocate-frac`, `--mcmc-min-opacity`, and `--mcmc-jitter-scale`.
 
+For surfel-style experiments, pass `--method 2dgs`. This keeps the vanilla
+Metal projection/rasterization path but clamps each Gaussian's local normal
+axis to a thin disk, controlled by `--2d-thickness` as a fraction of scene
+extent. The output remains a standard 3DGS PLY, so checkpoints still open in
+the built-in viewer and other splat viewers.
+
 Periodic saves render a deterministic held training view and report PSNR.
 Set `--eval-views N` to average that save-time PSNR over `N` evenly spaced
 training views while still saving the first rendered image. The default is one
@@ -124,9 +130,10 @@ view to keep periodic saves cheap.
 
 !!! note "Method variants"
     The default trainer remains vanilla 3DGS. MCMC-style fixed-budget
-    relocation is available with `--method mcmc`. 2DGS is still planned as a
-    separate surfel-style representation with ray-splat intersection and
-    geometry losses rather than a hidden change to the default 3DGS path.
+    relocation is available with `--method mcmc`; surfel-style 2DGS is
+    available with `--method 2dgs`. Full 2DGS geometry losses and surface
+    extraction refinements remain experimental work rather than hidden changes
+    to the default path.
 
 ## Low-memory training (8-16 GB Macs)
 
@@ -171,8 +178,15 @@ For quick timing and memory checks, use the benchmark helper:
 
 ```bash
 python examples/benchmark_gaussian_splatting.py --data /path/to/scene \
-    --downscale 4 --steps 20 --save-render /tmp/mlx3d_bench.png
+    --downscale 4 --steps 20 --seed 0 --eval-views 3 \
+    --save-render /tmp/mlx3d_bench.png
 ```
+
+The JSON report includes startup/init time, first-step and warmup timings,
+post-warmup mean/median/p90/p95/max step latency, render-stage timings,
+density-event wall times, memory counters, and deterministic multi-view PSNR.
+Use the same `--seed`, `--eval-views`, method, and densification settings when
+comparing variants.
 
 ## Blender-synthetic scenes
 

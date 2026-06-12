@@ -62,6 +62,7 @@ nav:
       - Quickstart: quickstart.md
       - Conventions: conventions.md
       - Interactive Viewer: viewer.md
+      - Release: release.md
   - Tutorials:
       - Mesh Optimization: tutorials/mesh_optimization.md
       - Point Cloud Fitting: tutorials/pointcloud_fitting.md
