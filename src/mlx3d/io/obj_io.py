@@ -7,9 +7,11 @@ vertex-color extension (``v x y z r g b``).
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 import mlx.core as mx
 import numpy as np
+from PIL import Image
 
 __all__ = ["load_obj", "save_obj", "ObjData"]
 
@@ -26,6 +28,8 @@ class ObjData:
         faces_normals_idx: (F, 3) per-corner indices into ``normals``, or ``None``.
         faces_texcoords_idx: (F, 3) per-corner indices into ``texcoords``, or ``None``.
         verts_colors: (V, 3) vertex colors if the file used the color extension.
+        texture_path: resolved diffuse texture path from ``.mtl`` / ``map_Kd``, or ``None``.
+        texture_image: (H, W, 3) diffuse texture in [0, 1] when loaded, or ``None``.
     """
 
     verts: mx.array
@@ -35,6 +39,8 @@ class ObjData:
     faces_normals_idx: mx.array | None = None
     faces_texcoords_idx: mx.array | None = None
     verts_colors: mx.array | None = None
+    texture_path: str | None = None
+    texture_image: mx.array | None = None
 
 
 def _resolve_index(idx: int, count: int) -> int:
@@ -42,8 +48,28 @@ def _resolve_index(idx: int, count: int) -> int:
     return idx - 1 if idx > 0 else count + idx
 
 
-def load_obj(path: str) -> ObjData:
+def _load_mtl_texture(mtl_path: Path) -> str | None:
+    if not mtl_path.exists():
+        return None
+    with open(mtl_path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split(maxsplit=1)
+            if len(parts) == 2 and parts[0] == "map_Kd":
+                return str((mtl_path.parent / parts[1]).resolve())
+    return None
+
+
+def _read_texture(path: str) -> mx.array:
+    img = Image.open(path).convert("RGB")
+    return mx.array(np.asarray(img, dtype=np.float32) / 255.0)
+
+
+def load_obj(path: str, load_texture: bool = True) -> ObjData:
     """Load a Wavefront OBJ file. Polygon faces are fan-triangulated."""
+    path_obj = Path(path)
     verts: list[list[float]] = []
     colors: list[list[float]] = []
     normals: list[list[float]] = []
@@ -53,15 +79,18 @@ def load_obj(path: str) -> ObjData:
     faces_vn: list[list[int]] = []
     any_vt = False
     any_vn = False
+    texture_path: str | None = None
 
-    with open(path, "r") as f:
+    with open(path_obj, "r") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
             parts = line.split()
             tag = parts[0]
-            if tag == "v":
+            if tag == "mtllib" and len(parts) > 1:
+                texture_path = _load_mtl_texture(path_obj.parent / parts[1])
+            elif tag == "v":
                 vals = [float(x) for x in parts[1:]]
                 verts.append(vals[:3])
                 if len(vals) >= 6:
@@ -110,6 +139,8 @@ def load_obj(path: str) -> ObjData:
             if len(colors) == len(verts) and colors
             else None
         ),
+        texture_path=texture_path,
+        texture_image=_read_texture(texture_path) if texture_path and load_texture else None,
     )
 
 

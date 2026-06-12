@@ -6,6 +6,8 @@ result is differentiable with respect to point positions, colors and radii,
 which is enough for silhouette/color-based point cloud optimization.
 """
 
+from __future__ import annotations
+
 import mlx.core as mx
 
 from ..cameras import Camera

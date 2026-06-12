@@ -11,6 +11,7 @@ from mlx3d.splatting import (
     eval_sh,
     num_sh_bases,
     project_gaussians,
+    render_gaussian_depth,
     render_gaussians,
     render_gaussians_reference,
     rgb_to_sh,
@@ -148,6 +149,36 @@ def test_kernel_matches_reference_forward(random_scene):
     assert_close(out_k["alpha"], out_r["alpha"], atol=1e-3)
 
 
+def test_kernel_matches_reference_forward_refined_tiles(random_scene):
+    cam, means, quats, scales, opac, colors = random_scene
+    bg = mx.array([0.1, 0.2, 0.3])
+    out_k = render_gaussians(
+        cam,
+        means,
+        quats,
+        scales,
+        opac,
+        colors=colors,
+        background=bg,
+        refine_tiles=True,
+    )
+    out_r = render_gaussians_reference(cam, means, quats, scales, opac, colors, background=bg)
+    assert_close(out_k["image"], out_r["image"], atol=1e-3)
+    assert_close(out_k["alpha"], out_r["alpha"], atol=1e-3)
+
+
+def test_depth_rasterization_outputs_valid_depth(random_scene):
+    cam, means, quats, scales, opac, _ = random_scene
+    out = render_gaussian_depth(cam, means, quats, scales, opac)
+    assert out["depth"].shape == (cam.height, cam.width)
+    assert out["alpha"].shape == (cam.height, cam.width)
+    valid = np.array(out["alpha"]) > 1e-3
+    assert valid.any()
+    depth = np.array(out["depth"])
+    assert np.isfinite(depth[valid]).all()
+    assert depth[valid].min() > 0.0
+
+
 def test_kernel_matches_reference_gradients(random_scene):
     cam, means, quats, scales, opac, colors = random_scene
     bg = mx.zeros((3,))
@@ -160,6 +191,7 @@ def test_kernel_matches_reference_gradients(random_scene):
             else:
                 o = render_fn(cam, means, quats, scales, opac, colors, background=bg)
             return ((o["image"] - target) ** 2).mean() + 0.05 * o["alpha"].mean()
+
         return loss
 
     gk = mx.grad(make_loss(render_gaussians, True), argnums=(0, 1, 2, 3, 4))(
@@ -214,6 +246,18 @@ def test_model_from_points_caps_initial_scale():
     assert float(mx.exp(model.params["scales"]).max()) <= 0.250001
 
 
+def test_model_2dgs_constraints_clamp_local_normal_scale():
+    pts = mx.random.normal((12, 3))
+    model = GaussianModel.from_points(pts, sh_degree=0)
+    model.params["scales"] = mx.log(mx.full((model.num_gaussians, 3), 0.5))
+
+    model.apply_2dgs_constraints(max_thickness=0.01)
+
+    scales = np.array(mx.exp(model.params["scales"]))
+    assert np.all(scales[:, 2] <= 0.010001)
+    np.testing.assert_allclose(scales[:, :2], 0.5, atol=1e-6)
+
+
 def test_model_ply_roundtrip(tmp_path):
     pts = mx.random.normal((20, 3))
     model = GaussianModel.from_points(pts, sh_degree=2)
@@ -241,6 +285,30 @@ def test_densify_and_prune():
     assert stats["cloned"] + stats["split"] == 10
     expected = n0 - stats["pruned"] + stats["cloned"] + 2 * stats["split"]
     assert model.num_gaussians == expected
+
+
+def test_mcmc_relocate_keeps_fixed_count():
+    mx.random.seed(12)
+    pts = mx.random.normal((30, 3)) * 0.2
+    model = GaussianModel.from_points(pts, sh_degree=0)
+    n0 = model.num_gaussians
+    model.params["opacities"] = model.params["opacities"].at[:5].add(-100.0)
+    before = np.array(model.params["means"])
+    grads = mx.concatenate([mx.zeros((10,)), mx.linspace(0.0, 1.0, 20)])
+    counts = mx.ones((n0,))
+
+    stats = model.relocate_mcmc(
+        grads,
+        counts,
+        relocate_frac=0.2,
+        min_opacity=0.05,
+        jitter_scale=0.0,
+    )
+
+    assert model.num_gaussians == n0
+    assert stats["relocated"] == 5
+    after = np.array(model.params["means"])
+    assert not np.allclose(after[:5], before[:5])
 
 
 def test_trainer_converges_single_view():
@@ -307,6 +375,101 @@ def test_trainer_densification_runs():
         info = trainer.step(cam, target)
     # Densification triggered at least once and the model kept training.
     assert np.isfinite(info["loss"])
+    assert trainer.grad_accum.shape == (model.num_gaussians,)
+    assert trainer.grad_count.shape == (model.num_gaussians,)
+
+
+def test_trainer_preserves_optimizer_state_after_densify_resize():
+    mx.random.seed(8)
+    model = GaussianModel.from_points(mx.random.normal((8, 3)) * 0.2, sh_degree=0)
+    trainer = GaussianTrainer(model, TrainerConfig(densify_from=10_000))
+    for name, opt in trainer.optimizers.items():
+        opt.init({name: model.params[name]})
+
+    opt = trainer.optimizers["means"]
+    old_m = mx.arange(model.num_gaussians * 3, dtype=mx.float32).reshape(model.num_gaussians, 3)
+    old_v = old_m + 100.0
+    opt.state["means"]["m"] = old_m
+    opt.state["means"]["v"] = old_v
+    opt.state["step"] = mx.array(17, dtype=mx.uint64)
+
+    keep_idx_np = np.array([1, 3, 6], dtype=np.int32)
+    keep_idx = mx.array(keep_idx_np)
+    model.select(keep_idx_np)
+    model.append({k: mx.zeros((2, *v.shape[1:]), dtype=v.dtype) for k, v in model.params.items()})
+
+    trainer._resize_optimizer_states_after_densify(
+        {
+            "_keep_idx": keep_idx_np,
+            "_new_count": 2,
+        }
+    )
+
+    state = trainer.optimizers["means"].state
+    expected_m = mx.concatenate([old_m[keep_idx], mx.zeros((2, 3))], axis=0)
+    expected_v = mx.concatenate([old_v[keep_idx], mx.zeros((2, 3))], axis=0)
+    assert_close(state["means"]["m"], expected_m, atol=0)
+    assert_close(state["means"]["v"], expected_v, atol=0)
+    assert int(state["step"]) == 17
+
+
+def test_trainer_mcmc_relocation_keeps_count_and_resets_moments():
+    mx.random.seed(13)
+    cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), width=32, height=32)
+    target = mx.random.uniform(shape=(32, 32, 3))
+    model = GaussianModel.from_points(mx.random.normal((40, 3)) * 0.4, sh_degree=0)
+    n0 = model.num_gaussians
+    config = TrainerConfig(
+        method="mcmc",
+        densify_from=1,
+        densify_every=2,
+        densify_grad_threshold=1e-9,
+        mcmc_relocate_frac=0.25,
+        mcmc_min_opacity=0.2,
+        mcmc_jitter_scale=0.0,
+        mcmc_noise_scale=0.0,
+    )
+    trainer = GaussianTrainer(model, config)
+    event = None
+    for _ in range(3):
+        info = trainer.step(cam, target)
+        if info["densify"] is not None:
+            event = info["densify"]
+
+    assert model.num_gaussians == n0
+    assert event is not None
+    assert event["relocated"] > 0
+    state = trainer.optimizers["means"].state["means"]
+    assert np.isfinite(np.array(state["m"])).all()
+
+
+def test_trainer_2dgs_keeps_surfel_thickness_after_densify():
+    mx.random.seed(14)
+    cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), width=32, height=32)
+    target = mx.random.uniform(shape=(32, 32, 3))
+    model = GaussianModel.from_points(mx.random.normal((40, 3)) * 0.4, sh_degree=0)
+    trainer = GaussianTrainer(
+        model,
+        TrainerConfig(
+            method="2dgs",
+            two_d_thickness=1e-3,
+            densify_from=1,
+            densify_every=2,
+            densify_grad_threshold=1e-9,
+        ),
+        scene_extent=2.0,
+    )
+
+    event = None
+    for _ in range(4):
+        info = trainer.step(cam, target)
+        if info["densify"] is not None:
+            event = info["densify"]
+
+    assert event is not None
+    scales = np.array(mx.exp(model.params["scales"]))
+    assert np.all(scales[:, 2] <= 0.002001)
+    assert trainer.grad_accum.shape == (model.num_gaussians,)
 
 
 def test_trainer_max_gaussians_cap():
@@ -315,8 +478,12 @@ def test_trainer_max_gaussians_cap():
     target = mx.random.uniform(shape=(32, 32, 3))
     model = GaussianModel.from_points(mx.random.normal((40, 3)) * 0.4, sh_degree=0)
     config = TrainerConfig(
-        densify_from=2, densify_every=4, densify_grad_threshold=1e-9,
-        max_gaussians=45, low_memory=True, cache_limit_gb=0.5,
+        densify_from=2,
+        densify_every=4,
+        densify_grad_threshold=1e-9,
+        max_gaussians=45,
+        low_memory=True,
+        cache_limit_gb=0.5,
     )
     trainer = GaussianTrainer(model, config)
     counts = [trainer.step(cam, target)["num_gaussians"] for _ in range(20)]

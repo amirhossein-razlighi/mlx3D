@@ -15,14 +15,22 @@ import numpy as np
 __all__ = ["load_ply", "save_ply", "PlyData"]
 
 _PLY_TO_NP = {
-    "char": "i1", "int8": "i1",
-    "uchar": "u1", "uint8": "u1",
-    "short": "i2", "int16": "i2",
-    "ushort": "u2", "uint16": "u2",
-    "int": "i4", "int32": "i4",
-    "uint": "u4", "uint32": "u4",
-    "float": "f4", "float32": "f4",
-    "double": "f8", "float64": "f8",
+    "char": "i1",
+    "int8": "i1",
+    "uchar": "u1",
+    "uint8": "u1",
+    "short": "i2",
+    "int16": "i2",
+    "ushort": "u2",
+    "uint16": "u2",
+    "int": "i4",
+    "int32": "i4",
+    "uint": "u4",
+    "uint32": "u4",
+    "float": "f4",
+    "float32": "f4",
+    "double": "f8",
+    "float64": "f8",
 }
 
 
@@ -54,7 +62,7 @@ def load_ply(path: str) -> PlyData:
     if header_end < 0:
         raise ValueError(f"{path!r} is not a valid PLY file (no end_header).")
     header = data[:header_end].decode("ascii", errors="replace").splitlines()
-    body = data[header_end + len(b"end_header\n"):]
+    body = data[header_end + len(b"end_header\n") :]
 
     if not header or header[0].strip() != "ply":
         raise ValueError(f"{path!r} is not a PLY file.")
@@ -73,7 +81,9 @@ def load_ply(path: str) -> PlyData:
             if not elements:
                 raise ValueError("property before element in PLY header.")
             if parts[1] == "list":
-                elements[-1][2].append(("__list__", parts[4], _PLY_TO_NP[parts[2]], _PLY_TO_NP[parts[3]]))
+                elements[-1][2].append(
+                    ("__list__", parts[4], _PLY_TO_NP[parts[2]], _PLY_TO_NP[parts[3]])
+                )
             else:
                 elements[-1][2].append((parts[2], _PLY_TO_NP[parts[1]]))
 
@@ -135,16 +145,16 @@ def load_ply(path: str) -> PlyData:
         if axis not in vert_props:
             raise ValueError(f"Vertex element missing {axis!r} property.")
 
-    verts = np.stack(
-        [vert_props["x"], vert_props["y"], vert_props["z"]], axis=-1
-    ).astype(np.float32)
+    verts = np.stack([vert_props["x"], vert_props["y"], vert_props["z"]], axis=-1).astype(
+        np.float32
+    )
     consumed = {"x", "y", "z"}
 
     normals = None
     if all(k in vert_props for k in ("nx", "ny", "nz")):
-        normals = np.stack(
-            [vert_props["nx"], vert_props["ny"], vert_props["nz"]], axis=-1
-        ).astype(np.float32)
+        normals = np.stack([vert_props["nx"], vert_props["ny"], vert_props["nz"]], axis=-1).astype(
+            np.float32
+        )
         consumed |= {"nx", "ny", "nz"}
 
     colors = None

@@ -14,9 +14,17 @@ from mlx3d.viewer import Viewer, view_gaussians, view_live_gaussians
 
 
 def test_camera_from_query_orbit():
-    q = {"theta": ["0.0"], "phi": ["0.0"], "radius": ["3.0"],
-         "tx": ["0"], "ty": ["0"], "tz": ["0"], "fov": ["60"],
-         "w": ["64"], "h": ["48"]}
+    q = {
+        "theta": ["0.0"],
+        "phi": ["0.0"],
+        "radius": ["3.0"],
+        "tx": ["0"],
+        "ty": ["0"],
+        "tz": ["0"],
+        "fov": ["60"],
+        "w": ["64"],
+        "h": ["48"],
+    }
     cam = Viewer.camera_from_query(q)
     assert cam.width == 64 and cam.height == 48
     # theta=phi=0 puts the eye at target + (0, 0, radius), looking at target.
@@ -40,6 +48,12 @@ def test_render_jpeg_bytes():
     data = viewer.render_jpeg(cam)
     assert data[:2] == b"\xff\xd8"  # JPEG magic
     assert len(data) > 500
+    depth = viewer.render_jpeg(cam, mode="depth")
+    assert depth[:2] == b"\xff\xd8"
+    assert len(depth) > 500
+    mesh = viewer.render_jpeg(cam, mode="mesh")
+    assert mesh[:2] == b"\xff\xd8"
+    assert len(mesh) > 500
 
 
 def test_live_gaussian_viewer_publish():
@@ -105,12 +119,24 @@ def test_http_endpoints():
     info = json.loads(urllib.request.urlopen(base + "/info", timeout=5).read())
     assert info["gaussians"] == 50
     assert info["mode"] == "gaussian splatting"
+    assert "depth" in info["display_modes"]
+    assert "mesh" in info["display_modes"]
     assert info["radius"] > 0
 
     frame = urllib.request.urlopen(
         base + "/render?theta=0.4&phi=0.2&radius=3&w=64&h=48", timeout=10
     ).read()
     assert frame[:2] == b"\xff\xd8"
+
+    depth = urllib.request.urlopen(
+        base + "/render?theta=0.4&phi=0.2&radius=3&w=64&h=48&mode=depth", timeout=10
+    ).read()
+    assert depth[:2] == b"\xff\xd8"
+
+    mesh = urllib.request.urlopen(
+        base + "/render?theta=0.4&phi=0.2&radius=3&w=64&h=48&mode=mesh", timeout=10
+    ).read()
+    assert mesh[:2] == b"\xff\xd8"
 
     try:
         urllib.request.urlopen(base + "/nope", timeout=5)

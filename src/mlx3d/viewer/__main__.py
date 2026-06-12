@@ -1,7 +1,7 @@
 """Command-line entry point: view a Gaussian Splatting checkpoint.
 
-    python -m mlx3d.viewer point_cloud.ply
-    mlx3d-view point_cloud.ply --port 8090 --background 1 1 1
+python -m mlx3d.viewer point_cloud.ply
+mlx3d-view point_cloud.ply --port 8090 --background 1 1 1
 """
 
 import argparse
@@ -15,10 +15,17 @@ def main() -> None:
     parser.add_argument("ply", type=str, help="path to a 3DGS-format .ply checkpoint")
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8090)
-    parser.add_argument("--background", type=float, nargs=3, default=(0.0, 0.0, 0.0),
-                        metavar=("R", "G", "B"), help="background color in [0, 1]")
-    parser.add_argument("--no-browser", action="store_true",
-                        help="don't open the browser automatically")
+    parser.add_argument(
+        "--background",
+        type=float,
+        nargs=3,
+        default=(0.0, 0.0, 0.0),
+        metavar=("R", "G", "B"),
+        help="background color in [0, 1]",
+    )
+    parser.add_argument(
+        "--no-browser", action="store_true", help="don't open the browser automatically"
+    )
     args = parser.parse_args()
 
     from ..splatting import GaussianModel

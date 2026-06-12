@@ -60,7 +60,11 @@ target-version = "py311"
 [tool.ruff.lint]
 extend-select = ["I"]
 
+[tool.ruff.lint.per-file-ignores]
+"examples/*.py" = ["E402"]
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = "-q"
 testpaths = ["tests"]
+pythonpath = ["src"]
