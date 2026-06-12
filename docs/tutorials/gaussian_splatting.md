@@ -71,6 +71,8 @@ fresh evaluated Gaussian snapshot every `--viewer-update-every` iterations
 (default: 25), so the preview does not copy the whole model to CPU or refresh
 on every optimizer step. Use `--viewer-no-browser` on remote shells and
 `--viewer-keep-open` if you want the viewer to remain active after training.
+Press `D` in the viewer to switch between RGB and the forward-only Metal depth
+map for geometry inspection, or `M` for a mesh-style depth-contour view.
 
 What the script does, in code:
 
@@ -99,6 +101,32 @@ model.save_ply("point_cloud.ply")                # standard 3DGS checkpoint
   accumulated per Gaussian; high-gradient small Gaussians are cloned,
   high-gradient large ones split, transparent/oversized ones pruned,
 - periodic opacity resets and progressive SH degree growth.
+
+The adaptive-density schedule is configurable from the training script:
+`--densify-from`, `--densify-until`, `--densify-every`, and
+`--densify-grad-threshold`. Gradient statistics are accumulated on the MLX
+device and only synchronized when clone/split/prune runs, keeping normal
+training steps GPU-resident. When densification changes the Gaussian table,
+Adam moments are preserved for surviving Gaussians and initialized to zero for
+new clone/split children.
+
+The default optimization method is vanilla 3DGS. For fixed-budget experiments,
+pass `--method mcmc` to replace clone/split growth with MCMC-style relocation:
+low-opacity or unused Gaussians are moved near high-gradient Gaussians at
+density-control events, Adam moments for moved rows are reset, and optional
+SGLD-like xyz noise is controlled with `--mcmc-noise-scale`. Useful knobs are
+`--mcmc-relocate-frac`, `--mcmc-min-opacity`, and `--mcmc-jitter-scale`.
+
+Periodic saves render a deterministic held training view and report PSNR.
+Set `--eval-views N` to average that save-time PSNR over `N` evenly spaced
+training views while still saving the first rendered image. The default is one
+view to keep periodic saves cheap.
+
+!!! note "Method variants"
+    The default trainer remains vanilla 3DGS. MCMC-style fixed-budget
+    relocation is available with `--method mcmc`. 2DGS is still planned as a
+    separate surfel-style representation with ray-splat intersection and
+    geometry losses rather than a hidden change to the default 3DGS path.
 
 ## Low-memory training (8-16 GB Macs)
 
@@ -172,6 +200,4 @@ directly in common viewers (SuperSplat, Polycam viewer, gsplat tools, ...)
 and you can fine-tune checkpoints trained elsewhere.
 
 !!! note "Current limitations"
-    - Densification rebuilds optimizer state (the reference implementation
-      preserves Adam moments through clone/split).
     - One camera per `step` call.

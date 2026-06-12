@@ -55,15 +55,18 @@ class Viewer:
         self,
         render_fn: RenderFn,
         info: dict | None = None,
+        render_modes: dict[str, RenderFn] | None = None,
         initial_radius: float = 4.0,
         initial_target: tuple[float, float, float] = (0.0, 0.0, 0.0),
         fov: float = 60.0,
     ):
         self.render_fn = render_fn
+        self.render_modes = render_modes or {}
         self.info = {
             "radius": initial_radius,
             "target": list(initial_target),
             "fov": fov,
+            "display_modes": ["rgb", *self.render_modes.keys()],
             **(info or {}),
         }
         self._info_lock = threading.Lock()
@@ -106,11 +109,11 @@ class Viewer:
             fov=fov, width=width, height=height,
         )
 
-    def render_jpeg(self, camera: Camera, quality: int = 85) -> bytes:
+    def render_jpeg(self, camera: Camera, quality: int = 85, mode: str = "rgb") -> bytes:
         from PIL import Image
 
         with self._lock:
-            img = self.render_fn(camera)
+            img = self.render_modes.get(mode, self.render_fn)(camera)
             mx.eval(img)
         arr = (np.clip(np.array(img), 0.0, 1.0) * 255).astype(np.uint8)
         buf = io.BytesIO()
@@ -145,8 +148,9 @@ class Viewer:
                     elif url.path == "/render":
                         q = parse_qs(url.query)
                         quality = int(float(q.get("q", [85])[0]))
+                        mode = q.get("mode", ["rgb"])[0]
                         cam = viewer.camera_from_query(q)
-                        self._send(200, "image/jpeg", viewer.render_jpeg(cam, quality))
+                        self._send(200, "image/jpeg", viewer.render_jpeg(cam, quality, mode))
                     else:
                         self._send(404, "text/plain", b"not found")
                 except BrokenPipeError:
@@ -206,13 +210,17 @@ class LiveGaussianViewer:
             center = np.array(initial_target, dtype=np.float32)
             radius = float(initial_radius)
         self.viewer = Viewer(
-            self._render,
+            lambda camera: self._render(camera, mode="rgb"),
             info={
                 "mode": "live gaussian splatting",
                 "live": True,
                 "max_scale": float(max_scale),
                 "poll_info_ms": int(poll_ms),
                 "status": "training",
+            },
+            render_modes={
+                "depth": lambda camera: self._render(camera, mode="depth"),
+                "mesh": lambda camera: self._render(camera, mode="mesh"),
             },
             initial_radius=radius,
             initial_target=tuple(float(c) for c in center),
@@ -256,13 +264,19 @@ class LiveGaussianViewer:
     def mark_done(self) -> None:
         self.viewer.update_info(status="done")
 
-    def _render(self, camera: Camera) -> mx.array:
+    def _render(self, camera: Camera, mode: str = "rgb") -> mx.array:
         with self._lock:
             params = dict(self._params)
             sh_degree = self._sh_degree
             active_sh_degree = self._active_sh_degree
         model = self._model_cls(params, sh_degree=sh_degree)
         model.active_sh_degree = active_sh_degree
+        if mode == "depth":
+            depth_out = model.render_depth(camera)
+            return _depth_to_rgb(depth_out["depth"], depth_out["alpha"])
+        if mode == "mesh":
+            depth_out = model.render_depth(camera)
+            return _depth_to_mesh_rgb(depth_out["depth"], depth_out["alpha"])
         return model.render(camera, background=self._background)["image"]
 
     def serve(self, host: str = "127.0.0.1", port: int = 8090, open_browser: bool = True):
@@ -331,15 +345,54 @@ def view_gaussians(
     def render(camera: Camera) -> mx.array:
         return model.render(camera, background=bg)["image"]
 
+    def render_depth(camera: Camera) -> mx.array:
+        depth_out = model.render_depth(camera)
+        return _depth_to_rgb(depth_out["depth"], depth_out["alpha"])
+
+    def render_mesh(camera: Camera) -> mx.array:
+        depth_out = model.render_depth(camera)
+        return _depth_to_mesh_rgb(depth_out["depth"], depth_out["alpha"])
+
     viewer = Viewer(
         render,
         info={"mode": "gaussian splatting", "gaussians": model.num_gaussians},
+        render_modes={"depth": render_depth, "mesh": render_mesh},
         initial_radius=radius,
         initial_target=tuple(float(c) for c in center),
     )
     if serve:
         viewer.serve(host=host, port=port, open_browser=open_browser)
     return viewer
+
+
+def _depth_shade(depth: mx.array, alpha: mx.array) -> tuple[mx.array, mx.array]:
+    valid = alpha > 1e-3
+    near = mx.min(mx.where(valid, depth, mx.full(depth.shape, 1e9, dtype=depth.dtype)))
+    far = mx.max(mx.where(valid, depth, mx.zeros_like(depth)))
+    denom = mx.maximum(far - near, 1e-6)
+    shade = 1.0 - (depth - near) / denom
+    shade = mx.where(valid, mx.clip(shade, 0.0, 1.0), mx.zeros_like(shade))
+    return shade, valid
+
+
+def _depth_to_rgb(depth: mx.array, alpha: mx.array) -> mx.array:
+    shade, _ = _depth_shade(depth, alpha)
+    return mx.stack([shade, shade, shade], axis=-1)
+
+
+def _depth_to_mesh_rgb(depth: mx.array, alpha: mx.array) -> mx.array:
+    shade, valid = _depth_shade(depth, alpha)
+    zero_col = mx.zeros((depth.shape[0], 1), dtype=depth.dtype)
+    zero_row = mx.zeros((1, depth.shape[1]), dtype=depth.dtype)
+    dzx = mx.concatenate([mx.abs(shade[:, 1:] - shade[:, :-1]), zero_col], axis=1)
+    dzy = mx.concatenate([mx.abs(shade[1:, :] - shade[:-1, :]), zero_row], axis=0)
+    dax = mx.concatenate([mx.abs(alpha[:, 1:] - alpha[:, :-1]), zero_col], axis=1)
+    day = mx.concatenate([mx.abs(alpha[1:, :] - alpha[:-1, :]), zero_row], axis=0)
+    contour = mx.maximum(mx.maximum(dzx, dzy) * 18.0, mx.maximum(dax, day) * 4.0)
+    contour = mx.where(valid, mx.clip(contour, 0.0, 1.0), mx.zeros_like(contour))
+    surface = mx.where(valid, 0.18 + 0.70 * shade, mx.zeros_like(shade))
+    value = surface * (1.0 - contour) + 0.02 * contour
+    return mx.stack([value, value, value], axis=-1)
 
 
 def view_nerf(

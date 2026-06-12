@@ -10,6 +10,12 @@ Renders a test view to outputs/nerf_view.png every 1000 iterations.
 
 import argparse
 import os
+import sys
+from pathlib import Path
+
+_SRC = Path(__file__).resolve().parents[1] / "src"
+if _SRC.exists():
+    sys.path.insert(0, str(_SRC))
 
 import mlx.core as mx
 import mlx.nn as nn

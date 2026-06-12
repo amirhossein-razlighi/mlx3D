@@ -15,8 +15,14 @@ periodic renders.
 
 import argparse
 import os
+import sys
 import threading
 import time
+from pathlib import Path
+
+_SRC = Path(__file__).resolve().parents[1] / "src"
+if _SRC.exists():
+    sys.path.insert(0, str(_SRC))
 
 import mlx.core as mx
 import numpy as np
@@ -68,6 +74,10 @@ def _format_train_info(it: int, total: int, info: dict[str, object], elapsed: fl
     return f"{msg}  {mem}" if mem else msg
 
 
+def _format_density_stats(stats: dict[str, object]) -> str:
+    return ", ".join(f"{k} {v}" for k, v in stats.items() if not str(k).startswith("_"))
+
+
 def _viewer_initial_frame(ds, scene_extent: float) -> tuple[float, tuple[float, float, float]]:
     cameras = getattr(ds, "cameras", None)
     if not cameras:
@@ -107,12 +117,32 @@ def main() -> None:
                         help="final unscaled xyz learning rate for exponential decay")
     parser.add_argument("--position-lr-max-steps", type=int, default=30_000,
                         help="steps over which xyz learning rate decays")
+    parser.add_argument("--method", choices=["vanilla", "mcmc"], default="vanilla",
+                        help="training strategy; vanilla 3DGS is the default")
+    parser.add_argument("--densify-from", type=int, default=500,
+                        help="first iteration that accumulates densification stats")
+    parser.add_argument("--densify-until", type=int, default=None,
+                        help="last iteration for densification (default: iters // 2)")
+    parser.add_argument("--densify-every", type=int, default=100,
+                        help="run clone/split/prune every N iterations")
+    parser.add_argument("--densify-grad-threshold", type=float, default=0.0002,
+                        help="screen-space gradient threshold for clone/split")
+    parser.add_argument("--mcmc-relocate-frac", type=float, default=0.02,
+                        help="MCMC mode: max fraction of Gaussians relocated per density event")
+    parser.add_argument("--mcmc-min-opacity", type=float, default=0.01,
+                        help="MCMC mode: opacity threshold for relocation targets")
+    parser.add_argument("--mcmc-jitter-scale", type=float, default=0.25,
+                        help="MCMC mode: relocation jitter as a multiple of source scale")
+    parser.add_argument("--mcmc-noise-scale", type=float, default=0.01,
+                        help="MCMC mode: per-step SGLD-like xyz noise scale")
     parser.add_argument("--cache-limit-gb", type=float, default=2.0,
                         help="MLX buffer-cache cap used with --low-mem")
     parser.add_argument("--log-every", type=int, default=10,
                         help="print fallback/log event frequency")
     parser.add_argument("--save-every", type=int, default=1000,
                         help="save render/checkpoint frequency; <=0 disables periodic saves")
+    parser.add_argument("--eval-views", type=int, default=1,
+                        help="number of deterministic training views to average for save-time PSNR")
     parser.add_argument("--no-progress", action="store_true",
                         help="disable tqdm progress bar even when tqdm is installed")
     parser.add_argument("--viewer", action="store_true",
@@ -201,8 +231,16 @@ def main() -> None:
         flush=True,
     )
     config = TrainerConfig(
+        method=args.method,
         white_background=white_bg,
-        densify_until=args.iters // 2,
+        densify_from=args.densify_from,
+        densify_until=args.densify_until if args.densify_until is not None else args.iters // 2,
+        densify_every=args.densify_every,
+        densify_grad_threshold=args.densify_grad_threshold,
+        mcmc_relocate_frac=args.mcmc_relocate_frac,
+        mcmc_min_opacity=args.mcmc_min_opacity,
+        mcmc_jitter_scale=args.mcmc_jitter_scale,
+        mcmc_noise_scale=args.mcmc_noise_scale,
         max_gaussians=max_gaussians,
         low_memory=args.low_mem,
         cache_limit_gb=args.cache_limit_gb,
@@ -277,9 +315,8 @@ def main() -> None:
             stats = info["densify"]
             _write_progress(
                 pbar,
-                "densify "
-                f"iter {it}: cloned {stats['cloned']}, split {stats['split']}, "
-                f"pruned {stats['pruned']}, gaussians {info['num_gaussians']}",
+                f"density iter {it}: {_format_density_stats(stats)}, "
+                f"gaussians {info['num_gaussians']}",
             )
         if info["opacity_reset"]:
             _write_progress(pbar, f"opacity reset at iter {it}")
@@ -307,6 +344,7 @@ def main() -> None:
                 ds,
                 white_bg,
                 os.path.join(args.out, f"render_{it:06d}.png"),
+                eval_views=args.eval_views,
                 log=lambda msg: _write_progress(pbar, msg),
             )
             model.save_ply(os.path.join(args.out, "point_cloud.ply"))
@@ -328,14 +366,26 @@ def main() -> None:
             pass
 
 
-def save_view(model, ds, white_bg, path, log=print):
+def save_view(model, ds, white_bg, path, eval_views: int = 1, log=print):
     from PIL import Image
 
-    cam, img = ds[0]
     bg = mx.ones((3,)) if white_bg else mx.zeros((3,))
-    out = model.render(cam, background=bg)
-    log(f"  eval view PSNR: {float(psnr(out['image'], img)):.2f} dB")
-    arr = (np.clip(np.array(out["image"]), 0, 1) * 255).astype(np.uint8)
+    n_eval = max(1, min(int(eval_views), len(ds)))
+    view_ids = np.linspace(0, len(ds) - 1, n_eval, dtype=np.int32)
+    psnrs = []
+    first = None
+    for i, view_id in enumerate(view_ids):
+        cam, img = ds[int(view_id)]
+        out = model.render(cam, background=bg)
+        psnrs.append(float(psnr(out["image"], img)))
+        if i == 0:
+            first = out["image"]
+    mean_psnr = float(np.mean(psnrs))
+    msg = f"  eval PSNR mean({n_eval} views): {mean_psnr:.2f} dB"
+    if n_eval > 1:
+        msg += f"  first {psnrs[0]:.2f}  last {psnrs[-1]:.2f}"
+    log(msg)
+    arr = (np.clip(np.array(first), 0, 1) * 255).astype(np.uint8)
     Image.fromarray(arr).save(path)
 
 

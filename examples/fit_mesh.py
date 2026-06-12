@@ -9,6 +9,12 @@ Usage:
 """
 
 import argparse
+import sys
+from pathlib import Path
+
+_SRC = Path(__file__).resolve().parents[1] / "src"
+if _SRC.exists():
+    sys.path.insert(0, str(_SRC))
 
 import mlx.core as mx
 import mlx.optimizers as optim

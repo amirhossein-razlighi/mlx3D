@@ -36,6 +36,8 @@ view_gaussians(model, background=(0, 0, 0))   # blocking; Ctrl-C to stop
 | scroll / pinch | zoom |
 | `R` | reset camera |
 | `U` | flip the up axis (handy for COLMAP scenes, which are often "upside down") |
+| `D` | toggle Gaussian RGB / expected-depth rendering |
+| `M` | toggle Gaussian RGB / mesh-style depth-contour rendering |
 | `H` | toggle the help panel |
 | `[` / `]` | render resolution down / up |
 
@@ -43,6 +45,16 @@ The page adapts resolution automatically: while you drag it renders at
 reduced resolution for responsiveness, then refines to full resolution when
 the camera settles. When nothing changes, no frames are requested at all —
 the GPU idles.
+
+Gaussian checkpoints expose two display modes in the browser: RGB and depth.
+Depth uses a forward-only Metal splatting pass that accumulates
+transmittance-weighted expected depth per pixel, then colorizes it on the GPU
+before JPEG encoding. It is meant for geometry inspection during training and
+does not add work to the differentiable RGB training path.
+
+The mesh-style mode uses the same GPU depth pass and overlays screen-space
+depth/alpha contours in MLX. It is a fast inspection view for geometry and
+holes, not an exported triangle mesh.
 
 ## Viewing a NeRF
 

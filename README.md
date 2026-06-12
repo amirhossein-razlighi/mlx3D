@@ -78,7 +78,12 @@ Contributions are welcome — file an issue to get started.
 - [x] COLMAP / Blender dataset loaders
 - [ ] Differentiable mesh rasterizer (soft rasterization)
 - [ ] Textured mesh rendering (`.mtl`, UV textures)
-- [ ] Optimizer-state-preserving densification for 3DGS
+- [x] Optimizer-state-preserving densification for 3DGS
+- [x] Configurable 3DGS training method with vanilla default and MCMC-style fixed-budget relocation
+- [ ] 2DGS / surfel-style Gaussian method with geometry losses
+- [ ] Additional well-known splatting recipes (anti-aliasing, compression, 3DGUT-style variants)
+- [x] Viewer depth-map mode for Gaussian checkpoints
+- [x] Viewer mesh-style inspection with GPU-efficient depth contours
 - [ ] Marching cubes / mesh extraction
 - [ ] More acceleration structures (hash-grid encodings for NeRF)
 
