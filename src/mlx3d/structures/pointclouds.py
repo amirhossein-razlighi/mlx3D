@@ -83,11 +83,7 @@ class Pointclouds:
         return self._features_list
 
     def points_packed(self) -> mx.array:
-        return (
-            mx.concatenate(self._points_list, axis=0)
-            if self._N
-            else mx.zeros((0, 3))
-        )
+        return mx.concatenate(self._points_list, axis=0) if self._N else mx.zeros((0, 3))
 
     def normals_packed(self) -> mx.array | None:
         if self._normals_list is None:
@@ -101,10 +97,7 @@ class Pointclouds:
 
     def points_packed_to_cloud_idx(self) -> mx.array:
         return mx.concatenate(
-            [
-                mx.full((p.shape[0],), i, dtype=mx.int32)
-                for i, p in enumerate(self._points_list)
-            ]
+            [mx.full((p.shape[0],), i, dtype=mx.int32) for i, p in enumerate(self._points_list)]
             or [mx.zeros((0,), dtype=mx.int32)]
         )
 

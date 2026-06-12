@@ -104,9 +104,7 @@ def axis_angle_to_quaternion(axis_angle: mx.array) -> mx.array:
 
 def quaternion_to_axis_angle(quaternions: mx.array) -> mx.array:
     """Convert quaternions ``(..., 4)`` to axis-angle vectors ``(..., 3)``."""
-    q = standardize_quaternion(
-        quaternions / mx.linalg.norm(quaternions, axis=-1, keepdims=True)
-    )
+    q = standardize_quaternion(quaternions / mx.linalg.norm(quaternions, axis=-1, keepdims=True))
     norms = mx.linalg.norm(q[..., 1:], axis=-1, keepdims=True)
     half_angles = mx.arctan2(norms, q[..., 0:1])
     angles = 2.0 * half_angles
@@ -152,9 +150,7 @@ def euler_angles_to_matrix(euler_angles: mx.array, convention: str = "XYZ") -> m
     """
     if len(convention) != 3 or any(c not in "XYZ" for c in convention):
         raise ValueError(f"Invalid convention {convention!r}.")
-    matrices = [
-        _axis_rotation(axis, euler_angles[..., i]) for i, axis in enumerate(convention)
-    ]
+    matrices = [_axis_rotation(axis, euler_angles[..., i]) for i, axis in enumerate(convention)]
     return matrices[0] @ matrices[1] @ matrices[2]
 
 

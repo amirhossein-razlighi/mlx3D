@@ -120,9 +120,7 @@ class Meshes:
     def verts_packed(self) -> mx.array:
         if self._verts_packed is None:
             self._verts_packed = (
-                mx.concatenate(self._verts_list, axis=0)
-                if self._N > 0
-                else mx.zeros((0, 3))
+                mx.concatenate(self._verts_list, axis=0) if self._N > 0 else mx.zeros((0, 3))
             )
         return self._verts_packed
 
@@ -135,9 +133,7 @@ class Meshes:
                 faces.append(f + offset)
                 offset += v.shape[0]
             self._faces_packed = (
-                mx.concatenate(faces, axis=0)
-                if faces
-                else mx.zeros((0, 3), dtype=mx.int32)
+                mx.concatenate(faces, axis=0) if faces else mx.zeros((0, 3), dtype=mx.int32)
             )
         return self._faces_packed
 
@@ -151,19 +147,13 @@ class Meshes:
 
     def verts_packed_to_mesh_idx(self) -> mx.array:
         return mx.concatenate(
-            [
-                mx.full((v.shape[0],), i, dtype=mx.int32)
-                for i, v in enumerate(self._verts_list)
-            ]
+            [mx.full((v.shape[0],), i, dtype=mx.int32) for i, v in enumerate(self._verts_list)]
             or [mx.zeros((0,), dtype=mx.int32)]
         )
 
     def faces_packed_to_mesh_idx(self) -> mx.array:
         return mx.concatenate(
-            [
-                mx.full((f.shape[0],), i, dtype=mx.int32)
-                for i, f in enumerate(self._faces_list)
-            ]
+            [mx.full((f.shape[0],), i, dtype=mx.int32) for i, f in enumerate(self._faces_list)]
             or [mx.zeros((0,), dtype=mx.int32)]
         )
 
@@ -184,9 +174,7 @@ class Meshes:
             rows = []
             for f in self._faces_list:
                 pad = F - f.shape[0]
-                rows.append(
-                    mx.pad(f, ((0, pad), (0, 0)), constant_values=-1) if pad > 0 else f
-                )
+                rows.append(mx.pad(f, ((0, pad), (0, 0)), constant_values=-1) if pad > 0 else f)
             self._faces_padded = (
                 mx.stack(rows, axis=0) if rows else mx.zeros((0, 0, 3), dtype=mx.int32)
             )
@@ -245,9 +233,7 @@ class Meshes:
             if faces.shape[0] == 0:
                 self._edges_packed = mx.zeros((0, 2), dtype=mx.int32)
             else:
-                e = np.concatenate(
-                    [faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]], axis=0
-                )
+                e = np.concatenate([faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]], axis=0)
                 e.sort(axis=1)
                 e = np.unique(e, axis=0)
                 self._edges_packed = mx.array(e.astype(np.int32))
@@ -276,9 +262,7 @@ class Meshes:
 
     def update_padded(self, new_verts_padded: mx.array) -> "Meshes":
         """Return a new ``Meshes`` with the same topology and new padded vertices."""
-        new_list = [
-            new_verts_padded[i, : v.shape[0]] for i, v in enumerate(self._verts_list)
-        ]
+        new_list = [new_verts_padded[i, : v.shape[0]] for i, v in enumerate(self._verts_list)]
         return Meshes(new_list, self._faces_list)
 
     def scale_verts(self, scale) -> "Meshes":

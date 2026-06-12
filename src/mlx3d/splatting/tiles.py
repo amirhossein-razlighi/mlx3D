@@ -59,11 +59,7 @@ def bin_gaussians(
     ymin = mx.clip(mx.floor((y - r) / TILE_SIZE), 0, tiles_y - 1).astype(mx.int32)
     ymax = mx.clip(mx.floor((y + r) / TILE_SIZE), 0, tiles_y - 1).astype(mx.int32)
 
-    on_screen = (
-        (radii > 0)
-        & (x + r >= 0) & (x - r < width)
-        & (y + r >= 0) & (y - r < height)
-    )
+    on_screen = (radii > 0) & (x + r >= 0) & (x - r < width) & (y + r >= 0) & (y - r < height)
     w_tiles = (xmax - xmin + 1) * on_screen
     h_tiles = (ymax - ymin + 1) * on_screen
     counts = (w_tiles * h_tiles).astype(mx.int32)  # (N,)
@@ -155,11 +151,15 @@ def bin_gaussians(
 
         active_pos = mx.cumsum(keep_i) - 1
         safe_pos = mx.where(keep, active_pos, mx.zeros_like(active_pos))
-        gauss_id = mx.zeros((active_total,), dtype=mx.int32).at[safe_pos].add(
-            mx.where(keep, gauss_id, mx.zeros_like(gauss_id))
+        gauss_id = (
+            mx.zeros((active_total,), dtype=mx.int32)
+            .at[safe_pos]
+            .add(mx.where(keep, gauss_id, mx.zeros_like(gauss_id)))
         )
-        tile_id = mx.zeros((active_total,), dtype=mx.int32).at[safe_pos].add(
-            mx.where(keep, tile_id, mx.zeros_like(tile_id))
+        tile_id = (
+            mx.zeros((active_total,), dtype=mx.int32)
+            .at[safe_pos]
+            .add(mx.where(keep, tile_id, mx.zeros_like(tile_id)))
         )
         total = active_total
 

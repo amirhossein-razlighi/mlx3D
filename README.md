@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./Logo.jpeg" height="auto" width="40%" />
+  <img src="./docs/assets/mlx3d-logo.png" height="auto" width="50%" />
 </p>
 
 # MLX3D
@@ -16,6 +16,7 @@ MLX3D brings the PyTorch3D workflow to Macs: batched 3D data structures, cameras
 - **Cameras & transforms** — OpenCV/COLMAP-convention pinhole cameras (ray generation, projection, look-at) and batched rotation conversions (quaternion, axis-angle, Euler, 6D).
 - **Ops & losses** — GPU brute-force k-NN, chamfer distance, area-weighted surface sampling, Laplacian/edge/normal-consistency mesh losses, PSNR and differentiable SSIM.
 - **NeRF** — positional encoding, the NeRF MLP, stratified + hierarchical sampling, volume rendering, Blender-synthetic dataset loader.
+- **Mesh rendering** — differentiable soft triangle rasterization, UV texture sampling for OBJ/MTL assets, and scalar-field mesh extraction.
 - **Gaussian Splatting** — a Metal translation of the reference CUDA rasterizer (tile-based forward & backward kernels wrapped in `mx.custom_function`), EWA projection, spherical harmonics, adaptive density control, COLMAP loading, and standard 3DGS `.ply` checkpoints. ~30 FPS forward at 720p with 100k Gaussians on an M-series GPU.
 - **Interactive viewer** — `mlx3d-view point_cloud.ply` opens a browser viewer with orbit/pan/zoom; frames are rendered on the Apple GPU by the Metal rasterizer and streamed live. Works for NeRFs too.
 - **IO** — OBJ and PLY (ascii + binary), including Gaussian Splatting checkpoint layouts.
@@ -76,8 +77,8 @@ Contributions are welcome — file an issue to get started.
 - [x] Differentiable point splatting renderer
 - [x] 3D Gaussian Splatting with Metal forward/backward kernels
 - [x] COLMAP / Blender dataset loaders
-- [ ] Differentiable mesh rasterizer (soft rasterization)
-- [ ] Textured mesh rendering (`.mtl`, UV textures)
+- [x] Differentiable mesh rasterizer (soft rasterization)
+- [x] Textured mesh rendering (`.mtl`, UV textures)
 - [x] Optimizer-state-preserving densification for 3DGS
 - [x] Configurable 3DGS training method with vanilla default and MCMC-style fixed-budget relocation
 - [x] 2DGS / surfel-style Gaussian mode with local-normal thickness constraints
@@ -85,8 +86,8 @@ Contributions are welcome — file an issue to get started.
 - [ ] Additional well-known splatting recipes (anti-aliasing, compression, 3DGUT-style variants)
 - [x] Viewer depth-map mode for Gaussian checkpoints
 - [x] Viewer mesh-style inspection with GPU-efficient depth contours
-- [ ] Marching cubes / mesh extraction
-- [ ] More acceleration structures (hash-grid encodings for NeRF)
+- [x] Marching cubes / mesh extraction
+- [x] More acceleration structures (hash-grid encodings for NeRF)
 
 ## License
 

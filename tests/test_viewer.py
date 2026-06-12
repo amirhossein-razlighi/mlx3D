@@ -14,9 +14,17 @@ from mlx3d.viewer import Viewer, view_gaussians, view_live_gaussians
 
 
 def test_camera_from_query_orbit():
-    q = {"theta": ["0.0"], "phi": ["0.0"], "radius": ["3.0"],
-         "tx": ["0"], "ty": ["0"], "tz": ["0"], "fov": ["60"],
-         "w": ["64"], "h": ["48"]}
+    q = {
+        "theta": ["0.0"],
+        "phi": ["0.0"],
+        "radius": ["3.0"],
+        "tx": ["0"],
+        "ty": ["0"],
+        "tz": ["0"],
+        "fov": ["60"],
+        "w": ["64"],
+        "h": ["48"],
+    }
     cam = Viewer.camera_from_query(q)
     assert cam.width == 64 and cam.height == 48
     # theta=phi=0 puts the eye at target + (0, 0, radius), looking at target.

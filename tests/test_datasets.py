@@ -17,9 +17,7 @@ def _write_blender_scene(root, n_frames=3, size=32):
         # Camera on the -z axis looking at origin, OpenGL c2w (identity-ish).
         c2w = np.eye(4)
         c2w[2, 3] = 4.0  # OpenGL camera at +z looks down -z toward origin
-        frames.append(
-            {"file_path": f"train/r_{i}", "transform_matrix": c2w.tolist()}
-        )
+        frames.append({"file_path": f"train/r_{i}", "transform_matrix": c2w.tolist()})
         rgba = np.zeros((size, size, 4), dtype=np.uint8)
         rgba[8:24, 8:24] = [255, 0, 0, 255]  # red square, transparent elsewhere
         Image.fromarray(rgba).save(os.path.join(root, "train", f"r_{i}.png"))
