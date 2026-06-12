@@ -342,12 +342,10 @@ class GaussianModel:
             return {"relocated": 0}
 
         # Prefer underused rows. If none exist, fall back to the lowest-opacity
-        # rows. Keep this selection on MLX arrays; only the scalar count above
-        # synchronizes to Python.
         target_score = mx.where(underused, 2.0 - opac, -opac)
-        dst = mx.argpartition(-target_score, k)[:k]
+        dst = mx.argpartition(-target_score, kth=k - 1)[:k]
         source_score = avg_grad.at[dst].add(-1e30 - avg_grad[dst])
-        src = mx.argpartition(-source_score, k)[:k]
+        src = mx.argpartition(-source_score, kth=k - 1)[:k]
         source_scales = mx.exp(self.params["scales"][src])
         reset_opacity = float(np.log(0.05 / 0.95))
         split_shrink = float(np.log(1.6))
