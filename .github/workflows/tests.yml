@@ -7,10 +7,26 @@ on:
   pull_request:
 
 jobs:
+  lint:
+    # Lint is platform-independent and needs no MLX, so run it fast on Linux.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Ruff lint
+        run: uvx ruff check .
+      - name: Ruff format
+        run: uvx ruff format --check .
+
   test:
+    needs: lint
     # macos-14+ runners are Apple Silicon, required for MLX (Metal GPU).
     runs-on: macos-14
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
     steps:
@@ -21,5 +37,9 @@ jobs:
           enable-cache: true
       - name: Install
         run: uv sync
-      - name: Run tests
-        run: uv run pytest tests/ -v
+      - name: Smoke tests
+        run: uv run pytest tests/ -m smoke -v
+      - name: Unit + data tests
+        run: uv run pytest tests/ -m "unit or data" -v
+      - name: Behavior tests
+        run: uv run pytest tests/ -m behavior -v
