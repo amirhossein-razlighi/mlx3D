@@ -175,8 +175,14 @@ def render_mesh_soft(
         in_front = mx.all(tz > camera.znear, axis=-1)[:, None, None]
         coverage = coverage * valid_area * in_front
 
+        # Barycentric coords go outside [0, 1] for pixels off the triangle, so
+        # ``z_face`` there can fall below ``znear`` and make ``inv_depth`` blow
+        # up. Clamp the exponent at 0 (the globally nearest face gets weight 1):
+        # this both matches the soft z-buffer semantics and avoids the
+        # ``coverage(=0) * exp(=inf) = NaN`` that would otherwise appear where a
+        # distant face projects far from the pixel.
         inv_depth = 1.0 / mx.maximum(z_face, camera.znear)
-        depth_w = mx.exp(depth_temperature * (inv_depth - max_inv_depth))
+        depth_w = mx.exp(mx.minimum(depth_temperature * (inv_depth - max_inv_depth), 0.0))
         weights = coverage * depth_w  # (C, H, W)
 
         if texture is not None:

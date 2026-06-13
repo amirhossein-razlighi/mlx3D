@@ -65,6 +65,12 @@ extend-select = ["I"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-addopts = "-q"
+addopts = "-q --strict-markers"
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+  "smoke: fast import/public-API checks that the package is wired together",
+  "unit: focused tests of a single function or class",
+  "behavior: end-to-end gradient/optimization behavior across modules",
+  "data: dataset loaders against synthetic in-process fixtures",
+]

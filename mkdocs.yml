@@ -70,6 +70,7 @@ nav:
       - "NeRF: Neural Radiance Fields": tutorials/nerf.md
       - Hash-Grid NeRF Encodings: tutorials/hashgrid_nerf.md
       - Gaussian Splatting: tutorials/gaussian_splatting.md
+      - Extending MLX3D: tutorials/extending.md
   - API Reference:
       - Structures: api/structures.md
       - Cameras: api/cameras.md
