@@ -269,7 +269,9 @@ def main() -> None:
         method=args.method,
         white_background=white_bg,
         densify_from=args.densify_from,
-        densify_until=args.densify_until if args.densify_until is not None else max(args.steps // 2, 0),
+        densify_until=args.densify_until
+        if args.densify_until is not None
+        else max(args.steps // 2, 0),
         densify_every=args.densify_every,
         densify_grad_threshold=args.densify_grad_threshold,
         mcmc_relocate_frac=args.mcmc_relocate_frac,
@@ -301,11 +303,13 @@ def main() -> None:
             step_times.append(dt)
             losses.append(float(info["loss"]))
             if info["densify"] is not None:
-                densify_events.append({
-                    "step": int(info["step"]),
-                    "wall_time_s": float(dt),
-                    **info["densify"],
-                })
+                densify_events.append(
+                    {
+                        "step": int(info["step"]),
+                        "wall_time_s": float(dt),
+                        **info["densify"],
+                    }
+                )
         else:
             warmup_step_times.append(dt)
 

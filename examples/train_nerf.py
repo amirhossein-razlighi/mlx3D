@@ -62,8 +62,13 @@ def main() -> None:
 
     def loss_fn(model, o, d, c):
         out = render_rays(
-            model, o, d, args.near, args.far,
-            num_coarse=args.num_coarse, num_fine=args.num_fine,
+            model,
+            o,
+            d,
+            args.near,
+            args.far,
+            num_coarse=args.num_coarse,
+            num_fine=args.num_fine,
             white_background=True,
         )
         loss = ((out["rgb"] - c) ** 2).mean()
@@ -88,7 +93,9 @@ def main() -> None:
         mx.eval(model.parameters(), optimizer.state)
 
         if it % 100 == 0:
-            print(f"iter {it:6d}  loss {float(loss):.5f}  psnr {-10*np.log10(float(loss)/2):.2f}")
+            print(
+                f"iter {it:6d}  loss {float(loss):.5f}  psnr {-10 * np.log10(float(loss) / 2):.2f}"
+            )
 
         if it % 1000 == 0:
             render_view(model, train.cameras[0], args, os.path.join(args.out, "nerf_view.png"))
@@ -102,9 +109,15 @@ def render_view(model, cam, args, path, chunk=4096):
     pixels = []
     for s in range(0, o.shape[0], chunk):
         out = render_rays(
-            model, o[s : s + chunk], d[s : s + chunk], args.near, args.far,
-            num_coarse=args.num_coarse, num_fine=args.num_fine,
-            stratified=False, white_background=True,
+            model,
+            o[s : s + chunk],
+            d[s : s + chunk],
+            args.near,
+            args.far,
+            num_coarse=args.num_coarse,
+            num_fine=args.num_fine,
+            stratified=False,
+            white_background=True,
         )
         pixels.append(out["rgb"])
         mx.eval(pixels[-1])
