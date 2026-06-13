@@ -1,0 +1,154 @@
+"""Behavior tests: gradients flow and optimization reduces loss end to end.
+
+These span multiple modules (cameras + renderers + losses + optimizers) and act
+as integration coverage for the differentiable pipeline.
+"""
+
+import mlx.core as mx
+import mlx.nn as nn
+import mlx.optimizers as optim
+
+from mlx3d.cameras import Camera
+from mlx3d.nn import NeRF, render_rays
+from mlx3d.ops import marching_cubes
+from mlx3d.renderer import render_mesh_soft, sample_along_rays, volume_render
+from mlx3d.splatting import GaussianModel, GaussianTrainer, TrainerConfig
+from mlx3d.utils import ico_sphere
+
+
+def test_multiface_mesh_renders_without_nan():
+    """Regression: a closed mesh (many faces) must not produce NaNs.
+
+    Faces far from a pixel get out-of-triangle barycentric coords, which can
+    push ``z_face`` below ``znear`` and overflow the depth weighting; the
+    rasterizer must stay finite and produce real coverage.
+    """
+    mesh = ico_sphere(level=3, radius=1.0)
+    verts = mesh.verts_packed()
+    colors = 0.5 * verts / mx.maximum(mx.linalg.norm(verts, axis=-1, keepdims=True), 1e-6) + 0.5
+    cam = Camera.look_at(eye=(2.2, 1.6, 2.2), at=(0, 0, 0), fov=45.0, width=64, height=64)
+
+    out = render_mesh_soft(cam, mesh, verts_colors=colors, sigma=3e-3, background=0.0)
+    mx.eval(out["image"], out["alpha"], out["depth"])
+    for key in ("image", "alpha", "depth"):
+        assert not bool(mx.isnan(out[key]).any()), f"NaN in {key}"
+    assert float(out["alpha"].mean()) > 0.05  # the sphere is actually visible
+
+
+def test_mesh_color_optimization_reduces_loss():
+    cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), fov=60.0, width=32, height=32)
+    verts = mx.array([[-0.7, -0.6, 0.0], [0.7, -0.6, 0.0], [0.0, 0.7, 0.0]])
+    faces = mx.array([[0, 1, 2]], dtype=mx.int32)
+    # Target is a real render with a known color, so it is exactly reachable.
+    target = render_mesh_soft(
+        cam, verts, faces, face_colors=mx.array([[0.2, 0.8, 0.3]]), sigma=0.02
+    )["image"]
+
+    opt = optim.Adam(learning_rate=0.1)
+
+    def loss_fn(color):
+        out = render_mesh_soft(cam, verts, faces, face_colors=color, sigma=0.02)
+        return mx.mean((out["image"] - target) ** 2)
+
+    losses = []
+    color = mx.array([[0.5, 0.5, 0.5]])
+    lg = mx.value_and_grad(loss_fn)
+    for _ in range(20):
+        loss, grad = lg(color)
+        color = opt.apply_gradients({"c": grad}, {"c": color})["c"]
+        mx.eval(color)
+        losses.append(float(loss))
+    assert losses[-1] < 0.2 * losses[0]
+
+
+def test_volume_render_color_fit_reduces_loss():
+    """Optimizing per-sample colors through the volume renderer fits a target."""
+    rays, samples = 64, 16
+    densities = mx.ones((rays, samples)) * 5.0  # high opacity -> strong color signal
+    t_vals = mx.broadcast_to(mx.linspace(0.0, 1.0, samples)[None], (rays, samples))
+    target = mx.broadcast_to(mx.array([0.9, 0.1, 0.4])[None], (rays, 3))
+
+    colors = mx.zeros((rays, samples, 3)) + 0.5
+    opt = optim.Adam(learning_rate=0.2)
+
+    def loss_fn(colors):
+        out = volume_render(densities, colors, t_vals)
+        return mx.mean((out["rgb"] - target) ** 2)
+
+    lg = mx.value_and_grad(loss_fn)
+    first = last = None
+    for i in range(60):
+        loss, grad = lg(colors)
+        colors = opt.apply_gradients({"c": grad}, {"c": colors})["c"]
+        mx.eval(colors)
+        if i == 0:
+            first = float(loss)
+        last = float(loss)
+    assert last < 0.2 * first
+
+
+def test_nerf_render_rays_trains_a_few_steps():
+    """A tiny NeRF reduces its loss on synthetic volume-rendered rays."""
+    mx.random.seed(0)
+    near, far = 1.0, 4.0
+    cam = Camera.look_at(eye=(0, 0, 2.8), at=(0, 0, 0), fov=45.0, width=24, height=24)
+    o, d = cam.generate_rays()
+    o, d = o.reshape(-1, 3), d.reshape(-1, 3)
+    pts, t = sample_along_rays(o, d, near, far, 48, stratified=False)
+    r = mx.linalg.norm(pts, axis=-1)
+    density = 30.0 * mx.maximum(0.6 - mx.abs(r - 0.6), 0.0)
+    rgb = 0.5 * pts / mx.maximum(r[..., None], 1e-6) + 0.5
+    target = volume_render(density, rgb, t, d)["rgb"]
+
+    model = NeRF(pos_freqs=4, dir_freqs=2, hidden_dim=32, num_layers=3, skip_layer=1)
+    opt = optim.Adam(learning_rate=2e-3)
+
+    def loss_fn(model):
+        out = render_rays(model, o, d, near, far, num_coarse=32)
+        return mx.mean((out["rgb"] - target) ** 2)
+
+    lg = nn.value_and_grad(model, loss_fn)
+    first = float(loss_fn(model))
+    for _ in range(40):
+        loss, grads = lg(model)
+        opt.update(model, grads)
+        mx.eval(model.parameters(), opt.state)
+    assert float(loss) < 0.8 * first
+    assert not bool(mx.isnan(loss))
+
+
+def test_gaussian_trainer_step_reduces_loss():
+    mx.random.seed(0)
+    cam = Camera.look_at(eye=(0, 0, 2.8), at=(0, 0, 0), fov=45.0, width=32, height=32)
+    o, d = cam.generate_rays()
+    o, d = o.reshape(-1, 3), d.reshape(-1, 3)
+    pts, t = sample_along_rays(o, d, 1.0, 4.0, 48, stratified=False)
+    r = mx.linalg.norm(pts, axis=-1)
+    density = 30.0 * mx.maximum(0.6 - mx.abs(r - 0.6), 0.0)
+    rgb = 0.5 * pts / mx.maximum(r[..., None], 1e-6) + 0.5
+    target = volume_render(density, rgb, t, d)["rgb"].reshape(32, 32, 3)
+
+    key = mx.random.normal((500, 3))
+    points = key / mx.maximum(mx.linalg.norm(key, axis=-1, keepdims=True), 1e-6) * 0.6
+    model = GaussianModel.from_points(points, mx.random.uniform(shape=(500, 3)), sh_degree=0)
+    trainer = GaussianTrainer(model, TrainerConfig(densify_from=10_000), scene_extent=1.0)
+
+    first = trainer.step(cam, target)["loss"]
+    for _ in range(20):
+        info = trainer.step(cam, target)
+    assert info["loss"] < first
+
+
+def test_marching_cubes_recovers_sphere_extent():
+    n = 32
+    lin = mx.linspace(-1.5, 1.5, n)
+    z, y, x = mx.meshgrid(lin, lin, lin, indexing="ij")
+    sdf = mx.sqrt(x**2 + y**2 + z**2) - 1.0
+    spacing = 3.0 / (n - 1)
+    mesh = marching_cubes(sdf, level=0.0, spacing=(spacing,) * 3, origin=(-1.5, -1.5, -1.5))
+    verts = mesh.verts_packed()
+    assert verts.shape[0] > 0
+    radii = mx.linalg.norm(verts, axis=-1)
+    # All surface vertices lie ~on the unit sphere.
+    assert abs(float(radii.mean()) - 1.0) < 0.1
+    assert float(radii.max()) < 1.2
