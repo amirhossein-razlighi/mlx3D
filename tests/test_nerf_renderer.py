@@ -9,12 +9,51 @@ from mlx3d.nn import (
     OccupancyGrid,
     PositionalEncoding,
     render_rays,
+    render_rays_occupancy,
 )
 from mlx3d.renderer import render_points, sample_along_rays, sample_pdf, volume_render
 
 
 def assert_close(a, b, atol=1e-5):
     np.testing.assert_allclose(np.array(a), np.array(b), atol=atol)
+
+
+def test_render_rays_occupancy_matches_dense_when_fully_occupied():
+    # With a fully-occupied grid and full budget, occupancy rendering must
+    # reproduce the dense render exactly (same samples, no skipping).
+    mx.random.seed(0)
+    model = HashGridNeRF(bounds=(-1.5, 1.5))
+    o = mx.random.normal((128, 3))
+    d = mx.random.normal((128, 3))
+    d = d / mx.linalg.norm(d, axis=-1, keepdims=True)
+    full = OccupancyGrid(resolution=8, bounds=(-100.0, 100.0))
+    full.occupancy = mx.ones((8, 8, 8), dtype=mx.bool_)
+    dense = render_rays(model, o, d, 2.0, 6.0, num_coarse=64, stratified=False)["rgb"]
+    occ = render_rays_occupancy(
+        model, o, d, 2.0, 6.0, full, num_samples=64, eval_fraction=1.0, stratified=False
+    )["rgb"]
+    np.testing.assert_allclose(np.array(occ), np.array(dense), atol=1e-5)
+
+
+def test_render_rays_occupancy_gradient_flows():
+    import mlx.nn as nn
+    import mlx.utils as mu
+
+    mx.random.seed(0)
+    model = HashGridNeRF(bounds=(-1.5, 1.5))
+    o = mx.random.normal((64, 3)) * 0.1
+    d = mx.random.normal((64, 3))
+    d = d / mx.linalg.norm(d, axis=-1, keepdims=True)
+    grid = OccupancyGrid(resolution=32, bounds=(-1.5, 1.5))
+    grid.update(lambda p: model(p, mx.zeros_like(p))[0], threshold=0.01)
+
+    def loss(m):
+        out = render_rays_occupancy(m, o, d, 1.5, 4.5, grid, num_samples=48, eval_fraction=0.5)
+        return mx.mean(out["rgb"] ** 2)
+
+    _, grads = nn.value_and_grad(model, loss)(model)
+    total = sum(float(mx.abs(v).sum()) for _, v in mu.tree_flatten(grads))
+    assert total > 0.0
 
 
 def test_occupancy_grid_matches_analytic_sphere():
