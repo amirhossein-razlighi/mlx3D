@@ -3,11 +3,72 @@ import math
 import mlx.core as mx
 import numpy as np
 
-from mlx3d.cameras import Camera, look_at, look_at_view_transform
+from mlx3d.cameras import Camera, CameraBatch, look_at, look_at_view_transform
 
 
 def assert_close(a, b, atol=1e-5):
     np.testing.assert_allclose(np.array(a), np.array(b), atol=atol)
+
+
+def _ring_cameras(n=5, w=64, h=48):
+    return [
+        Camera.look_at(
+            eye=(2.0 * math.cos(a), 1.0, 2.0 * math.sin(a)),
+            at=(0, 0, 0),
+            fov=45.0,
+            width=w,
+            height=h,
+        )
+        for a in np.linspace(0.0, 2.0, n)
+    ]
+
+
+def test_camera_batch_projection_matches_per_camera():
+    cams = _ring_cameras()
+    batch = CameraBatch.from_cameras(cams)
+    assert len(batch) == len(cams)
+    pts = mx.random.normal((10, 3))
+    xy_b, z_b = batch.project_points(pts)
+    assert xy_b.shape == (len(cams), 10, 2)
+    for i, c in enumerate(cams):
+        xy_s, z_s = c.project_points(pts)
+        assert_close(xy_b[i], xy_s)
+        assert_close(z_b[i], z_s)
+
+
+def test_camera_batch_indexing_and_centers():
+    cams = _ring_cameras()
+    batch = CameraBatch.from_cameras(cams)
+    pts = mx.random.normal((5, 3))
+    # Indexing returns an equivalent single Camera.
+    xy_single, _ = batch[2].project_points(pts)
+    xy_batch, _ = batch.project_points(pts)
+    assert_close(xy_single, xy_batch[2])
+    for i, c in enumerate(cams):
+        assert_close(batch.camera_centers[i], c.camera_center)
+
+
+def test_camera_batch_rays_match_per_camera():
+    cams = _ring_cameras(n=3)
+    batch = CameraBatch.from_cameras(cams)
+    o_b, d_b = batch.generate_rays()
+    assert o_b.shape == (3, 48, 64, 3)
+    for i, c in enumerate(cams):
+        o_s, d_s = c.generate_rays()
+        assert_close(o_b[i], o_s)
+        assert_close(d_b[i], d_s)
+
+
+def test_camera_batch_requires_uniform_size():
+    cams = [
+        Camera.look_at(eye=(0, 0, -3.0), width=64, height=64),
+        Camera.look_at(eye=(0, 0, -3.0), width=32, height=64),
+    ]
+    try:
+        CameraBatch.from_cameras(cams)
+        raise AssertionError("expected ValueError for mismatched sizes")
+    except ValueError:
+        pass
 
 
 def test_look_at_center_projects_to_principal_point():
