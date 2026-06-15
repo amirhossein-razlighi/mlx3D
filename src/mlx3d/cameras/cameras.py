@@ -18,7 +18,14 @@ from dataclasses import dataclass
 
 import mlx.core as mx
 
-__all__ = ["Camera", "look_at", "look_at_view_transform", "fov_to_focal", "focal_to_fov"]
+__all__ = [
+    "Camera",
+    "CameraBatch",
+    "look_at",
+    "look_at_view_transform",
+    "fov_to_focal",
+    "focal_to_fov",
+]
 
 
 def fov_to_focal(fov: float, pixels: int) -> float:
@@ -274,4 +281,105 @@ class Camera:
         dirs_world = dirs_cam @ self.R  # == dirs_cam @ R^-T == R^T applied per-vector
         dirs_world = dirs_world / mx.linalg.norm(dirs_world, axis=-1, keepdims=True)
         origins = mx.broadcast_to(self.camera_center, dirs_world.shape)
+        return origins, dirs_world
+
+
+@dataclass
+class CameraBatch:
+    """A batch of ``N`` pinhole cameras with vectorized projection and rays.
+
+    Stores stacked extrinsics/intrinsics (``R`` ``(N, 3, 3)``, ``t`` ``(N, 3)``,
+    ``fx``/``fy``/``cx``/``cy`` ``(N,)``) sharing one image size. Indexing returns
+    a single :class:`Camera`, so it interoperates with the per-camera renderers;
+    the batched methods avoid Python loops for multi-view projection and ray
+    generation (e.g. projecting one point set into every view at once).
+    """
+
+    R: mx.array  # (N, 3, 3)
+    t: mx.array  # (N, 3)
+    fx: mx.array  # (N,)
+    fy: mx.array  # (N,)
+    cx: mx.array  # (N,)
+    cy: mx.array  # (N,)
+    width: int
+    height: int
+    znear: float = 0.01
+    zfar: float = 100.0
+
+    @classmethod
+    def from_cameras(cls, cameras: list[Camera]) -> "CameraBatch":
+        """Stack a list of single :class:`Camera` objects into a batch."""
+        if not cameras:
+            raise ValueError("from_cameras needs at least one camera.")
+        w, h = cameras[0].width, cameras[0].height
+        if any((c.width, c.height) != (w, h) for c in cameras):
+            raise ValueError("CameraBatch requires all cameras to share an image size.")
+        return cls(
+            R=mx.stack([mx.array(c.R) for c in cameras]),
+            t=mx.stack([mx.array(c.t) for c in cameras]),
+            fx=mx.array([float(c.fx) for c in cameras]),
+            fy=mx.array([float(c.fy) for c in cameras]),
+            cx=mx.array([float(c.cx) for c in cameras]),
+            cy=mx.array([float(c.cy) for c in cameras]),
+            width=w,
+            height=h,
+            znear=float(cameras[0].znear),
+            zfar=float(cameras[0].zfar),
+        )
+
+    def __len__(self) -> int:
+        return int(self.R.shape[0])
+
+    def __getitem__(self, i: int) -> Camera:
+        return Camera(
+            R=self.R[i],
+            t=self.t[i],
+            fx=float(self.fx[i]),
+            fy=float(self.fy[i]),
+            cx=float(self.cx[i]),
+            cy=float(self.cy[i]),
+            width=self.width,
+            height=self.height,
+            znear=self.znear,
+            zfar=self.zfar,
+        )
+
+    @property
+    def camera_centers(self) -> mx.array:
+        """``(N, 3)`` camera positions in world coordinates."""
+        return -(mx.swapaxes(self.R, -1, -2) @ self.t[..., None])[..., 0]
+
+    def world_to_camera(self, points: mx.array) -> mx.array:
+        """Transform world points ``(P, 3)`` into each camera frame -> ``(N, P, 3)``."""
+        return points[None] @ mx.swapaxes(self.R, -1, -2) + self.t[:, None, :]
+
+    def project_points(self, points: mx.array, eps: float = 1e-8) -> tuple[mx.array, mx.array]:
+        """Project world points ``(P, 3)`` into all ``N`` views.
+
+        Returns ``(xy, depth)`` of shapes ``(N, P, 2)`` and ``(N, P)``.
+        """
+        pc = self.world_to_camera(points)  # (N, P, 3)
+        z = pc[..., 2]
+        inv_z = 1.0 / mx.where(mx.abs(z) < eps, mx.full(z.shape, eps), z)
+        u = self.fx[:, None] * pc[..., 0] * inv_z + self.cx[:, None]
+        v = self.fy[:, None] * pc[..., 1] * inv_z + self.cy[:, None]
+        return mx.stack([u, v], axis=-1), z
+
+    def generate_rays(self) -> tuple[mx.array, mx.array]:
+        """Per-pixel rays for every camera.
+
+        Returns ``(origins, directions)`` both ``(N, height, width, 3)`` in world
+        coordinates, with normalized directions.
+        """
+        n, h, w = len(self), self.height, self.width
+        uu = mx.broadcast_to((mx.arange(w, dtype=mx.float32) + 0.5)[None, :], (h, w))
+        vv = mx.broadcast_to((mx.arange(h, dtype=mx.float32) + 0.5)[:, None], (h, w))
+        # Per-camera intrinsics -> direction in camera space, then to world.
+        xcam = (uu[None] - self.cx[:, None, None]) / self.fx[:, None, None]  # (N, H, W)
+        ycam = (vv[None] - self.cy[:, None, None]) / self.fy[:, None, None]
+        dirs_cam = mx.stack([xcam, ycam, mx.ones_like(xcam)], axis=-1)  # (N, H, W, 3)
+        dirs_world = dirs_cam.reshape(n, h * w, 3) @ self.R  # (N, HW, 3)
+        dirs_world = dirs_world / mx.linalg.norm(dirs_world, axis=-1, keepdims=True)
+        dirs_world = dirs_world.reshape(n, h, w, 3)
+        origins = mx.broadcast_to(self.camera_centers[:, None, None, :], dirs_world.shape)
         return origins, dirs_world
