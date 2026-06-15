@@ -7,7 +7,43 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from mlx3d.datasets import load_blender, load_colmap
+from mlx3d.datasets import load_blender, load_colmap, load_instant_ngp
+
+
+def _write_ngp_scene(root, n_frames=3, w=60, h=40):
+    os.makedirs(os.path.join(root, "images"), exist_ok=True)
+    frames = []
+    for i in range(n_frames):
+        c2w = np.eye(4)
+        c2w[2, 3] = 4.0  # OpenGL c2w camera at +z
+        Image.fromarray(np.zeros((h, w, 3), dtype=np.uint8)).save(
+            os.path.join(root, "images", f"r{i}.png")
+        )
+        frames.append({"file_path": f"images/r{i}.png", "transform_matrix": c2w.tolist()})
+    meta = {"w": w, "h": h, "fl_x": 50.0, "fl_y": 50.0, "cx": w / 2, "cy": h / 2, "frames": frames}
+    with open(os.path.join(root, "transforms.json"), "w") as f:
+        json.dump(meta, f)
+
+
+def test_load_instant_ngp(tmp_path):
+    root = str(tmp_path)
+    _write_ngp_scene(root)
+    ds = load_instant_ngp(root)
+    assert len(ds) == 3
+    cam, img = ds[0]
+    assert img.shape == (40, 60, 3)
+    assert cam.fx == 50.0 and cam.cx == 30.0
+    assert (cam.width, cam.height) == (60, 40)
+    np.testing.assert_allclose(np.array(cam.camera_center), [0, 0, 4.0], atol=1e-5)
+
+
+def test_load_instant_ngp_downscale_scales_intrinsics(tmp_path):
+    root = str(tmp_path)
+    _write_ngp_scene(root)
+    ds = load_instant_ngp(root, downscale=2)
+    cam, img = ds[0]
+    assert (cam.width, cam.height) == (30, 20)
+    assert cam.fx == 25.0 and cam.cx == 15.0  # intrinsics halve with the image
 
 
 def _write_blender_scene(root, n_frames=3, size=32):

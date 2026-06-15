@@ -164,7 +164,9 @@ outputs/outputs/
 site/
 outputs/
 *cache/
-*data*/
+# Local datasets (COLMAP/NeRF scenes) at the repo root — but NOT src/mlx3d/datasets.
+/data/
+/data*/
 
 # Local planning notes
 TODO.md
