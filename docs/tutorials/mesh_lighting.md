@@ -59,6 +59,24 @@ Shading is **two-sided** by default: each normal is oriented toward the camera
 before lighting, so meshes with inward or inconsistent winding (very common in
 the wild) still light correctly instead of rendering black.
 
+## Textured meshes
+
+Pass a `texture` plus UV coordinates to shade from an image instead of vertex
+colors. UVs are interpolated over the fragments and the texture is sampled
+bilinearly (differentiable w.r.t. the texture, so it can be optimized):
+
+```python
+out = render_mesh(
+    camera, verts, faces,
+    texture=image,            # (H, W, 3) in [0, 1]
+    verts_uvs=verts_uvs,      # (VT, 2)
+    faces_uvs=faces_uvs,      # (F, 3) indices into verts_uvs
+    shading="none",
+)
+```
+
+<p align="center"><img src="../../assets/render_textured.png" width="40%" /></p>
+
 ## Working with fragments directly
 
 For custom shading, rasterize once and interpolate any per-vertex attribute

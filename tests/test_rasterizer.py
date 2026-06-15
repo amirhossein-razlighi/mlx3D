@@ -119,6 +119,35 @@ def test_two_sided_shading_lights_inward_wound_mesh():
     assert float(lit.mean()) > 0.25  # clearly more than pure ambient on black
 
 
+def test_textured_render_samples_texture():
+    # A 2x2 texture mapped onto a full-UV quad: corners read the corner texels.
+    tex = mx.array(
+        [
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            [[0.0, 0.0, 1.0], [1.0, 1.0, 1.0]],
+        ]
+    )
+    verts = mx.array([[-1.0, -1, 0], [1.0, -1, 0], [1.0, 1, 0], [-1.0, 1, 0]])
+    faces = mx.array([[0, 1, 2], [0, 2, 3]], dtype=mx.int32)
+    verts_uvs = mx.array([[0.0, 0], [1.0, 0], [1.0, 1], [0.0, 1]])
+    cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), fov=50.0, width=64, height=64)
+    out = render_mesh(
+        cam, verts, faces, texture=tex, verts_uvs=verts_uvs, faces_uvs=faces, shading="none"
+    )
+    assert not bool(mx.isnan(out["image"]).any())
+    img, alpha = np.array(out["image"]), np.array(out["alpha"])
+    assert alpha.mean() > 0.3  # the quad is visible
+    # The rendered colors come from the texture palette, not mid-grey default.
+    assert img[alpha > 0.5].std() > 0.1
+
+    # Missing UVs is an error.
+    try:
+        render_mesh(cam, verts, faces, texture=tex)
+        raise AssertionError("expected ValueError without UVs")
+    except ValueError:
+        pass
+
+
 def test_shading_none_returns_albedo():
     mesh = ico_sphere(level=2, radius=1.0)
     cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), fov=60.0, width=32, height=32)
