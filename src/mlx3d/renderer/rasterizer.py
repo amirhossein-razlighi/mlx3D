@@ -13,36 +13,46 @@ itself must be differentiable), use :func:`mlx3d.renderer.render_mesh_soft`.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 
 import mlx.core as mx
 
 from ..cameras import Camera
+from ..splatting.tiles import bin_gaussians
 from ..structures import Meshes
 
 __all__ = ["Fragments", "rasterize_meshes", "interpolate_face_attributes"]
 
 _EPS = 1e-12
 
-# One thread per pixel. Each thread scans every face, keeps the nearest one in
-# front of the near plane. params = [num_faces, height, width].
+# Tile-based: each pixel only scans the faces binned to its 16x16 tile (faces
+# sorted by tile then depth), so cost is ~O(faces_in_tile) instead of O(F).
+# params = [width, height, tiles_x].
 _RASTER_SRC = """
-    uint x = thread_position_in_grid.x;
-    uint y = thread_position_in_grid.y;
-    const int F = params[0];
+    constexpr int TILE = 16;
+    const int W = params[0];
     const int H = params[1];
-    const int W = params[2];
-    if ((int)x >= W || (int)y >= H) return;
+    const int tiles_x = params[2];
+
+    const uint2 tile = threadgroup_position_in_grid.xy;
+    const uint2 lid = thread_position_in_threadgroup.xy;
+    const int px = tile.x * TILE + lid.x;
+    const int py = tile.y * TILE + lid.y;
+    const bool inside = (px < W) && (py < H);
+
+    const int tile_id = tile.y * tiles_x + tile.x;
+    const int range_start = tile_ranges[2 * tile_id];
+    const int range_end = tile_ranges[2 * tile_id + 1];
 
     const float znear = znear_arr[0];
-    const float cx = (float)x + 0.5f;
-    const float cy = (float)y + 0.5f;
+    const float cx = (float)px + 0.5f;
+    const float cy = (float)py + 0.5f;
 
     int best_f = -1;
     float best_z = 1e30f;
 
-    for (int f = 0; f < F; ++f) {
+    for (int k = range_start; k < range_end; ++k) {
+        const int f = sorted_ids[k];
         const float ax = tri_xy[f * 6 + 0];
         const float ay = tri_xy[f * 6 + 1];
         const float bx = tri_xy[f * 6 + 2];
@@ -63,14 +73,16 @@ _RASTER_SRC = """
         if (z < best_z) { best_z = z; best_f = f; }
     }
 
-    const uint idx = y * W + x;
-    pix_to_face[idx] = best_f;
-    zbuf[idx] = (best_f >= 0) ? best_z : 0.0f;
+    if (inside) {
+        const int idx = py * W + px;
+        pix_to_face[idx] = best_f;
+        zbuf[idx] = (best_f >= 0) ? best_z : 0.0f;
+    }
 """
 
 _raster_kernel = mx.fast.metal_kernel(
-    name="mesh_rasterize_hard",
-    input_names=["tri_xy", "tri_z", "params", "znear_arr"],
+    name="mesh_rasterize_hard_tiled",
+    input_names=["tri_xy", "tri_z", "sorted_ids", "tile_ranges", "params", "znear_arr"],
     output_names=["pix_to_face", "zbuf"],
     source=_RASTER_SRC,
 )
@@ -120,31 +132,40 @@ def rasterize_meshes(
     verts, faces_idx = _as_verts_faces(mesh_or_verts, faces)
     faces_idx = faces_idx.astype(mx.int32)
     h, w = int(camera.height), int(camera.width)
-    f = int(faces_idx.shape[0])
 
     xy, z = camera.project_points(verts)  # (V, 2), (V,)
     tri_xy = xy[faces_idx]  # (F, 3, 2)
     tri_z = z[faces_idx]  # (F, 3)
 
-    params = mx.array([f, h, w], dtype=mx.int32)
+    # Bin faces into screen tiles via a per-face bounding circle (reusing the
+    # Gaussian-Splatting tiler), so each pixel only scans faces in its tile.
+    sxy = mx.stop_gradient(tri_xy)
+    centroid = mx.mean(sxy, axis=1)  # (F, 2)
+    radii = mx.sqrt(mx.max(mx.sum((sxy - centroid[:, None, :]) ** 2, axis=-1), axis=1))
+    depths = mx.mean(mx.stop_gradient(tri_z), axis=1)  # (F,) for tile sort order
+    sorted_ids, tile_ranges, tiles_x, tiles_y = bin_gaussians(
+        centroid, radii, depths, w, h
+    )
+
+    params = mx.array([w, h, tiles_x], dtype=mx.int32)
     znear_arr = mx.array([float(camera.znear)], dtype=mx.float32)
 
-    tg = 16
-    grid = (int(math.ceil(w / tg) * tg), int(math.ceil(h / tg) * tg), 1)
     # Visibility is discrete: detach the kernel inputs so autodiff never tries
     # to differentiate the custom kernel. Gradients reach the vertices through
     # the MLX barycentric recompute below instead.
     pix_to_face, zbuf = _raster_kernel(
         inputs=[
-            mx.contiguous(mx.stop_gradient(tri_xy).reshape(-1).astype(mx.float32)),
+            mx.contiguous(sxy.reshape(-1).astype(mx.float32)),
             mx.contiguous(mx.stop_gradient(tri_z).reshape(-1).astype(mx.float32)),
+            sorted_ids.astype(mx.int32),
+            tile_ranges.astype(mx.int32),
             params,
             znear_arr,
         ],
         output_shapes=[(h * w,), (h * w,)],
         output_dtypes=[mx.int32, mx.float32],
-        grid=grid,
-        threadgroup=(tg, tg, 1),
+        grid=(tiles_x * 16, tiles_y * 16, 1),
+        threadgroup=(16, 16, 1),
     )
     pix_to_face = pix_to_face.reshape(h, w)
     valid = pix_to_face >= 0
