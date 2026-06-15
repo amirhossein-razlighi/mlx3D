@@ -65,6 +65,7 @@ nav:
   - Tutorials:
       - Mesh Optimization: tutorials/mesh_optimization.md
       - Mesh Rendering and Extraction: tutorials/mesh_rendering.md
+      - Mesh Lighting and Shading: tutorials/mesh_lighting.md
       - Point Cloud Fitting: tutorials/pointcloud_fitting.md
       - "NeRF: Neural Radiance Fields": tutorials/nerf.md
       - Hash-Grid NeRF Encodings: tutorials/hashgrid_nerf.md
