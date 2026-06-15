@@ -155,16 +155,31 @@ def load_colmap(
     for _, meta in sorted(imgs_meta.items(), key=lambda kv: kv[1]["name"]):
         cam = cams_meta[meta["camera_id"]]
         params = cam["params"]
-        if cam["model"] == "SIMPLE_PINHOLE":
+        distortion = None
+        fisheye = False
+        model = cam["model"]
+        if model == "SIMPLE_PINHOLE":
             fx = fy = params[0]
             cx, cy = params[1], params[2]
-        elif cam["model"] in ("PINHOLE", "OPENCV", "OPENCV_FISHEYE"):
+        elif model == "PINHOLE":
             fx, fy, cx, cy = params[:4]
-        elif cam["model"] in ("SIMPLE_RADIAL", "RADIAL"):
+        elif model == "SIMPLE_RADIAL":
             fx = fy = params[0]
             cx, cy = params[1], params[2]
+            distortion = (params[3], 0.0, 0.0, 0.0)
+        elif model == "RADIAL":
+            fx = fy = params[0]
+            cx, cy = params[1], params[2]
+            distortion = (params[3], params[4], 0.0, 0.0)
+        elif model == "OPENCV":
+            fx, fy, cx, cy = params[:4]
+            distortion = tuple(params[4:8])  # k1, k2, p1, p2
+        elif model == "OPENCV_FISHEYE":
+            fx, fy, cx, cy = params[:4]
+            distortion = tuple(params[4:8])  # k1, k2, k3, k4
+            fisheye = True
         else:  # pragma: no cover
-            raise ValueError(f"Unsupported camera model {cam['model']}")
+            raise ValueError(f"Unsupported camera model {model}")
 
         image_path = os.path.join(root, images_dir, meta["name"])
         file_size = _image_size(image_path)
@@ -189,6 +204,8 @@ def load_colmap(
                 cy=cy * sy,
                 width=int(W),
                 height=int(H),
+                distortion=distortion,
+                fisheye=fisheye,
             )
         )
         if load_images:

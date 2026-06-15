@@ -38,6 +38,58 @@ def focal_to_fov(focal: float, pixels: int) -> float:
     return 2.0 * math.atan(pixels / (2.0 * focal))
 
 
+def _brown_distort(x: mx.array, y: mx.array, c: tuple[float, ...]) -> tuple[mx.array, mx.array]:
+    """Brown-Conrady (OpenCV) distortion of normalized coords. ``c`` = (k1, k2, p1, p2[, k3])."""
+    k1, k2, p1, p2 = c[0], c[1], c[2], c[3]
+    k3 = c[4] if len(c) > 4 else 0.0
+    r2 = x * x + y * y
+    radial = 1.0 + r2 * (k1 + r2 * (k2 + r2 * k3))
+    x_d = x * radial + 2.0 * p1 * x * y + p2 * (r2 + 2.0 * x * x)
+    y_d = y * radial + p1 * (r2 + 2.0 * y * y) + 2.0 * p2 * x * y
+    return x_d, y_d
+
+
+def _brown_undistort(xd: mx.array, yd: mx.array, c: tuple[float, ...], iters: int = 8):
+    """Invert Brown-Conrady distortion by fixed-point iteration."""
+    k1, k2, p1, p2 = c[0], c[1], c[2], c[3]
+    k3 = c[4] if len(c) > 4 else 0.0
+    x, y = xd, yd
+    for _ in range(iters):
+        r2 = x * x + y * y
+        radial = 1.0 + r2 * (k1 + r2 * (k2 + r2 * k3))
+        dx = 2.0 * p1 * x * y + p2 * (r2 + 2.0 * x * x)
+        dy = p1 * (r2 + 2.0 * y * y) + 2.0 * p2 * x * y
+        x = (xd - dx) / radial
+        y = (yd - dy) / radial
+    return x, y
+
+
+def _fisheye_distort(x: mx.array, y: mx.array, c: tuple[float, ...], eps: float = 1e-9):
+    """OpenCV equidistant fisheye distortion. ``c`` = (k1, k2, k3, k4)."""
+    k1, k2, k3, k4 = (list(c) + [0.0, 0.0, 0.0, 0.0])[:4]
+    r = mx.sqrt(x * x + y * y)
+    theta = mx.arctan(r)
+    th2 = theta * theta
+    theta_d = theta * (1.0 + th2 * (k1 + th2 * (k2 + th2 * (k3 + th2 * k4))))
+    scale = theta_d / mx.maximum(r, eps)
+    return x * scale, y * scale
+
+
+def _fisheye_undistort(
+    xd: mx.array, yd: mx.array, c: tuple[float, ...], iters: int = 8, eps: float = 1e-9
+):
+    """Invert fisheye distortion: solve for theta, then map back to a pinhole ray."""
+    k1, k2, k3, k4 = (list(c) + [0.0, 0.0, 0.0, 0.0])[:4]
+    theta_d = mx.sqrt(xd * xd + yd * yd)
+    theta = theta_d
+    for _ in range(iters):
+        th2 = theta * theta
+        theta = theta_d / (1.0 + th2 * (k1 + th2 * (k2 + th2 * (k3 + th2 * k4))))
+    r = mx.tan(theta)
+    scale = r / mx.maximum(theta_d, eps)
+    return xd * scale, yd * scale
+
+
 def look_at(eye: mx.array, at: mx.array, up: mx.array) -> tuple[mx.array, mx.array]:
     """Build OpenCV-convention extrinsics ``(R, t)`` for a camera at ``eye`` looking at ``at``.
 
@@ -97,6 +149,12 @@ class Camera:
         orthographic: if ``True``, use an orthographic projection (parallel
             rays, no perspective divide). ``fx``/``fy`` then act as
             pixels-per-world-unit instead of focal lengths.
+        distortion: optional lens distortion coefficients. Brown-Conrady
+            ``(k1, k2, p1, p2[, k3])`` by default, or OpenCV fisheye
+            ``(k1, k2, k3, k4)`` when ``fisheye=True``. Applied in
+            :meth:`project_points` and inverted in :meth:`generate_rays` /
+            :meth:`unproject_points`.
+        fisheye: select the equidistant fisheye distortion model.
     """
 
     R: mx.array
@@ -110,6 +168,8 @@ class Camera:
     znear: float = 0.01
     zfar: float = 100.0
     orthographic: bool = False
+    distortion: tuple[float, ...] | None = None
+    fisheye: bool = False
 
     @classmethod
     def orthographic_camera(
@@ -241,9 +301,27 @@ class Camera:
             v = self.fy * pc[..., 1] + self.cy
             return mx.stack([u, v], axis=-1), z
         inv_z = 1.0 / mx.where(mx.abs(z) < eps, mx.full(z.shape, eps), z)
-        u = self.fx * pc[..., 0] * inv_z + self.cx
-        v = self.fy * pc[..., 1] * inv_z + self.cy
+        x, y = pc[..., 0] * inv_z, pc[..., 1] * inv_z
+        x, y = self._distort(x, y)
+        u = self.fx * x + self.cx
+        v = self.fy * y + self.cy
         return mx.stack([u, v], axis=-1), z
+
+    def _distort(self, x: mx.array, y: mx.array) -> tuple[mx.array, mx.array]:
+        """Apply lens distortion to normalized image coords (identity if none)."""
+        if self.distortion is None:
+            return x, y
+        if self.fisheye:
+            return _fisheye_distort(x, y, self.distortion)
+        return _brown_distort(x, y, self.distortion)
+
+    def _undistort(self, x: mx.array, y: mx.array) -> tuple[mx.array, mx.array]:
+        """Invert lens distortion on normalized image coords (identity if none)."""
+        if self.distortion is None:
+            return x, y
+        if self.fisheye:
+            return _fisheye_undistort(x, y, self.distortion)
+        return _brown_undistort(x, y, self.distortion)
 
     def unproject_points(self, xy: mx.array, depth: mx.array) -> mx.array:
         """Lift pixel coordinates ``(..., 2)`` with z-depths ``(...,)`` back to world points."""
@@ -251,9 +329,10 @@ class Camera:
             x = (xy[..., 0] - self.cx) / self.fx
             y = (xy[..., 1] - self.cy) / self.fy
             return self.camera_to_world(mx.stack([x, y, depth], axis=-1))
-        x = (xy[..., 0] - self.cx) / self.fx * depth
-        y = (xy[..., 1] - self.cy) / self.fy * depth
-        return self.camera_to_world(mx.stack([x, y, depth], axis=-1))
+        xd = (xy[..., 0] - self.cx) / self.fx
+        yd = (xy[..., 1] - self.cy) / self.fy
+        x, y = self._undistort(xd, yd)
+        return self.camera_to_world(mx.stack([x * depth, y * depth, depth], axis=-1))
 
     def generate_rays(self) -> tuple[mx.array, mx.array]:
         """Generate one ray per pixel (at pixel centers).
@@ -277,6 +356,7 @@ class Camera:
             fwd = fwd / mx.linalg.norm(fwd)
             dirs_world = mx.broadcast_to(fwd, origins.shape)
             return origins, dirs_world
+        xc, yc = self._undistort(xc, yc)  # pixels carry distortion; rays must not
         dirs_cam = mx.stack([xc, yc, mx.ones_like(uu)], axis=-1)
         dirs_world = dirs_cam @ self.R  # == dirs_cam @ R^-T == R^T applied per-vector
         dirs_world = dirs_world / mx.linalg.norm(dirs_world, axis=-1, keepdims=True)
