@@ -2,6 +2,7 @@ import mlx.core as mx
 import numpy as np
 
 from mlx3d.losses import (
+    LPIPS,
     chamfer_distance,
     closest_point_on_triangle,
     mesh_edge_loss,
@@ -329,6 +330,21 @@ def test_ms_ssim_monotonic_and_differentiable():
 
     g = mx.grad(loss)(mx.clip(img + 0.1, 0, 1))
     assert not bool(mx.isnan(g).any())
+
+
+def test_lpips_structural_properties():
+    mx.random.seed(0)
+    lp = LPIPS()
+    x = mx.random.uniform(shape=(48, 48, 3))
+    # Identical images -> exactly zero (holds for any weights).
+    assert abs(float(lp(x, x))) < 1e-6
+    # Non-negative and monotonic with corruption (lin weights kept >= 0).
+    small = float(lp(x, mx.clip(x + mx.random.normal(x.shape) * 0.05, 0, 1)))
+    large = float(lp(x, mx.clip(x + mx.random.normal(x.shape) * 0.6, 0, 1)))
+    assert 0.0 <= small < large
+    # Differentiable w.r.t. the image.
+    g = mx.grad(lambda z: lp(z, x))(mx.clip(x + 0.1, 0, 1))
+    assert not bool(mx.isnan(g).any()) and float(mx.abs(g).sum()) > 0
 
 
 def test_ms_ssim_small_image_raises():
