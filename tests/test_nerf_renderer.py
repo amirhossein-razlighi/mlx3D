@@ -2,12 +2,36 @@ import mlx.core as mx
 import numpy as np
 
 from mlx3d.cameras import Camera
-from mlx3d.nn import HashGridEncoding, HashGridNeRF, NeRF, PositionalEncoding, render_rays
+from mlx3d.nn import (
+    HashGridEncoding,
+    HashGridNeRF,
+    NeRF,
+    OccupancyGrid,
+    PositionalEncoding,
+    render_rays,
+)
 from mlx3d.renderer import render_points, sample_along_rays, sample_pdf, volume_render
 
 
 def assert_close(a, b, atol=1e-5):
     np.testing.assert_allclose(np.array(a), np.array(b), atol=atol)
+
+
+def test_occupancy_grid_matches_analytic_sphere():
+    def density(p):
+        r = mx.linalg.norm(p, axis=-1)
+        return mx.where(r < 0.6, 10.0, 0.0)
+
+    grid = OccupancyGrid(resolution=64, bounds=(-1.5, 1.5))
+    grid.update(density, threshold=1.0)
+    # Occupied fraction ~ sphere volume / box volume.
+    expected = (4.0 / 3.0 * np.pi * 0.6**3) / (3.0**3)
+    assert abs(grid.occupied_fraction - expected) < 0.005
+    # Point queries: inside occupied, outside/empty not.
+    q = grid.query(mx.array([[0.0, 0, 0], [1.4, 1.4, 1.4], [0.5, 0, 0], [0.65, 0, 0]]))
+    assert [bool(x) for x in q] == [True, False, True, False]
+    # Out-of-bounds is empty.
+    assert not bool(grid.query(mx.array([[5.0, 5, 5]]))[0])
 
 
 def test_hashgrid_nerf_forward_and_render_rays():
