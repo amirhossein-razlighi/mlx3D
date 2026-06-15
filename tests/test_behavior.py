@@ -10,7 +10,7 @@ import mlx.core as mx
 import mlx.nn as nn
 import mlx.optimizers as optim
 
-from mlx3d.cameras import Camera
+from mlx3d.cameras import Camera, refine_camera
 from mlx3d.nn import HashGridNeRF, NeRF, render_rays
 from mlx3d.ops import marching_cubes
 from mlx3d.renderer import (
@@ -236,6 +236,29 @@ def test_render_mesh_color_optimization_reduces_loss():
             first = float(loss)
         last = float(loss)
     assert last < 0.25 * first
+
+
+def test_pose_optimization_recovers_perturbed_camera():
+    """Optimizing an SE(3) twist through refine_camera recovers a known pose."""
+    mx.random.seed(0)
+    true_cam = Camera.look_at(eye=(0.4, 0.3, -3.0), at=(0, 0, 0), fov=50.0, width=128, height=128)
+    pts = mx.random.normal((40, 3)) * 0.6
+    target_xy, _ = true_cam.project_points(pts)
+    # Start from a wrongly-posed camera.
+    perturbed = refine_camera(true_cam, mx.array([0.15, -0.1, 0.2, 0.08, -0.05, 0.06]))
+
+    def loss(xi):
+        xy, _ = refine_camera(perturbed, xi).project_points(pts)
+        return mx.mean((xy - target_xy) ** 2)
+
+    xi = mx.zeros((6,))
+    opt = optim.Adam(learning_rate=0.05)
+    first = float(loss(xi))
+    for _ in range(200):
+        loss_val, g = mx.value_and_grad(loss)(xi)
+        xi = opt.apply_gradients({"x": g}, {"x": xi})["x"]
+        mx.eval(xi)
+    assert float(loss(xi)) < 0.05 * first  # reprojection error collapses
 
 
 def test_marching_cubes_recovers_sphere_extent():
