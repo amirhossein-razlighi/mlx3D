@@ -11,7 +11,7 @@ import mlx.nn as nn
 import mlx.optimizers as optim
 
 from mlx3d.cameras import Camera
-from mlx3d.nn import NeRF, render_rays
+from mlx3d.nn import HashGridNeRF, NeRF, render_rays
 from mlx3d.ops import marching_cubes
 from mlx3d.renderer import (
     interpolate_face_attributes,
@@ -123,6 +123,38 @@ def test_nerf_render_rays_trains_a_few_steps():
         opt.update(model, grads)
         mx.eval(model.parameters(), opt.state)
     assert float(loss) < 0.8 * first
+    assert not bool(mx.isnan(loss))
+
+
+def test_hashgrid_nerf_converges_fast_on_synthetic():
+    """The hash-grid NeRF should fit synthetic rays quickly and reach a low loss."""
+    mx.random.seed(0)
+    near, far = 1.0, 4.0
+    cam = Camera.look_at(eye=(0, 0, 2.8), at=(0, 0, 0), fov=45.0, width=24, height=24)
+    o, d = cam.generate_rays()
+    o, d = o.reshape(-1, 3), d.reshape(-1, 3)
+    pts, t = sample_along_rays(o, d, near, far, 48, stratified=False)
+    r = mx.linalg.norm(pts, axis=-1)
+    density = 30.0 * mx.maximum(0.6 - mx.abs(r - 0.6), 0.0)
+    rgb = 0.5 * pts / mx.maximum(r[..., None], 1e-6) + 0.5
+    target = volume_render(density, rgb, t, d)["rgb"]
+
+    model = HashGridNeRF(
+        bounds=(-1.5, 1.5), num_levels=8, log2_hashmap_size=15, finest_resolution=256
+    )
+    opt = optim.Adam(learning_rate=5e-3)
+
+    def loss_fn(model):
+        out = render_rays(model, o, d, near, far, num_coarse=48)
+        return mx.mean((out["rgb"] - target) ** 2)
+
+    lg = nn.value_and_grad(model, loss_fn)
+    first = float(loss_fn(model))
+    for _ in range(60):
+        loss, grads = lg(model)
+        opt.update(model, grads)
+        mx.eval(model.parameters(), opt.state)
+    assert float(loss) < 0.3 * first  # converges quickly
     assert not bool(mx.isnan(loss))
 
 

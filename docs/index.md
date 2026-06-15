@@ -6,11 +6,11 @@ MLX3D brings the PyTorch3D workflow to Macs: batched 3D data structures, cameras
 
 <p align="center">
   <img src="assets/render_lit_sphere.png" width="24%" />
-  <img src="assets/render_lit_torus.png" width="24%" />
-  <img src="assets/gallery_volume.png" width="24%" />
+  <img src="assets/gallery_nerf.png" width="24%" />
   <img src="assets/gallery_gsplat.png" width="24%" />
+  <img src="assets/render_lit_torus.png" width="24%" />
 </p>
-<p align="center"><em>All rendered on the Apple GPU: Phong-lit mesh, two-sided shading, volume rendering, and a fitted Gaussian-splat scene.</em></p>
+<p align="center"><em>All rendered on the Apple GPU: a Phong-lit mesh; a hash-grid NeRF on the Lego scene (27 dB); 3D Gaussian Splatting on the Tanks-and-Temples truck scene; two-sided mesh shading.</em></p>
 
 ## Highlights
 
