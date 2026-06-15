@@ -25,6 +25,7 @@ __all__ = [
     "look_at_view_transform",
     "fov_to_focal",
     "focal_to_fov",
+    "refine_camera",
 ]
 
 
@@ -463,3 +464,36 @@ class CameraBatch:
         dirs_world = dirs_world.reshape(n, h, w, 3)
         origins = mx.broadcast_to(self.camera_centers[:, None, None, :], dirs_world.shape)
         return origins, dirs_world
+
+
+def refine_camera(camera: Camera, twist: mx.array) -> Camera:
+    """Return a copy of ``camera`` whose pose is perturbed by an SE(3) ``twist``.
+
+    The world-to-camera extrinsics are left-multiplied by ``exp(twist)`` (a 6D
+    Lie-algebra vector ``[v, omega]``), so at ``twist = 0`` the camera is
+    unchanged. The result is differentiable w.r.t. ``twist``, which makes camera
+    poses optimizable jointly with a scene (BARF / pose-free NeRF & 3DGS):
+    parameterize each view by a learnable twist, refine the camera, render, and
+    backpropagate.
+
+    Intrinsics, image size and distortion are carried over unchanged.
+    """
+    from ..transforms.se3 import Transform3d, se3_exp_map
+
+    delta = se3_exp_map(twist)
+    refined = Transform3d(camera.R, camera.t).compose(delta)
+    return Camera(
+        R=refined.rot,
+        t=refined.trans,
+        fx=camera.fx,
+        fy=camera.fy,
+        cx=camera.cx,
+        cy=camera.cy,
+        width=camera.width,
+        height=camera.height,
+        znear=camera.znear,
+        zfar=camera.zfar,
+        orthographic=camera.orthographic,
+        distortion=camera.distortion,
+        fisheye=camera.fisheye,
+    )

@@ -5,6 +5,7 @@ from .cameras import (
     fov_to_focal,
     look_at,
     look_at_view_transform,
+    refine_camera,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "fov_to_focal",
     "look_at",
     "look_at_view_transform",
+    "refine_camera",
 ]

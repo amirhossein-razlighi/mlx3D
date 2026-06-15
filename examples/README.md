@@ -25,6 +25,7 @@ Apple-Silicon Mac — ideal for a first look or for CI.
 | [`fit_mesh.py`](fit_mesh.py) | Mesh fitting | Deform an icosphere onto a target with chamfer + mesh regularizers. |
 | [`fit_nerf.py`](fit_nerf.py) | NeRF | Train a compact NeRF on synthetic views, render a held-out view. |
 | [`fit_gaussians.py`](fit_gaussians.py) | Gaussian splatting | Fit 3D Gaussians to synthetic views with the real `GaussianTrainer`. |
+| [`refine_pose.py`](refine_pose.py) | Pose optimization | Recover a camera pose by optimizing an SE(3) twist via `refine_camera` (BARF-style). |
 | [`extend_renderer.py`](extend_renderer.py) | Extensibility | Plug a custom renderer into the pipeline via the `Renderer` protocol. |
 
 ## Real-scene training (bring your own dataset)
