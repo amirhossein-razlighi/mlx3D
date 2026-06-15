@@ -18,6 +18,7 @@ import mlx.core as mx
 
 from ..cameras import Camera
 from ..structures import Meshes
+from .mesh import sample_texture
 from .protocols import RenderOutput
 from .rasterizer import interpolate_face_attributes, rasterize_meshes
 
@@ -155,6 +156,9 @@ def render_mesh(
     mesh_or_verts: Meshes | mx.array,
     faces: mx.array | None = None,
     verts_colors: mx.array | None = None,
+    texture: mx.array | None = None,
+    verts_uvs: mx.array | None = None,
+    faces_uvs: mx.array | None = None,
     lights: list[Light] | None = None,
     shininess: float = 32.0,
     specular_strength: float = 0.3,
@@ -163,12 +167,18 @@ def render_mesh(
 ) -> RenderOutput:
     """Render a mesh with the hard rasterizer and Blinn-Phong lighting.
 
+    Albedo comes from a UV texture when ``texture`` is given, otherwise from
+    ``verts_colors`` (default mid-grey).
+
     Args:
         camera: viewing camera.
         mesh_or_verts: a single-mesh :class:`~mlx3d.structures.Meshes` or ``(V, 3)``
             vertices (``faces`` then required).
         faces: ``(F, 3)`` indices when passing raw vertices.
         verts_colors: ``(V, 3)`` albedo; defaults to mid-grey.
+        texture: ``(H, W, 3)`` diffuse texture; requires ``verts_uvs`` and ``faces_uvs``.
+        verts_uvs: ``(VT, 2)`` UV coordinates.
+        faces_uvs: ``(F, 3)`` per-corner indices into ``verts_uvs``.
         lights: light list; defaults to one key light + ambient. ``shading="none"``
             ignores lights and returns flat albedo.
         shading: ``"phong"`` or ``"none"`` (unlit albedo).
@@ -179,11 +189,20 @@ def render_mesh(
     """
     mesh = mesh_or_verts if isinstance(mesh_or_verts, Meshes) else Meshes([mesh_or_verts], [faces])
     verts = mesh.verts_packed()
-    if verts_colors is None:
-        verts_colors = mx.full((verts.shape[0], 3), 0.7)
 
     frag = rasterize_meshes(camera, mesh)
-    albedo = interpolate_face_attributes(frag, verts_colors)
+    if texture is not None:
+        if verts_uvs is None or faces_uvs is None:
+            raise ValueError("verts_uvs and faces_uvs are required with a texture.")
+        # Interpolate per-corner UVs over the fragments, then sample the texture.
+        fidx = mx.where(frag.valid, frag.pix_to_face, 0)
+        uv_tri = verts_uvs[faces_uvs.astype(mx.int32)[fidx]]  # (H, W, 3, 2)
+        uv = mx.sum(frag.bary[..., None] * uv_tri, axis=-2)  # (H, W, 2)
+        albedo = sample_texture(texture, uv) * frag.valid[..., None]
+    else:
+        if verts_colors is None:
+            verts_colors = mx.full((verts.shape[0], 3), 0.7)
+        albedo = interpolate_face_attributes(frag, verts_colors)
 
     if shading == "none":
         image = albedo
