@@ -1,4 +1,5 @@
 from .ball_query import ball_query
+from .geometry import decimate_mesh, estimate_point_normals, icp
 from .knn import knn_gather, knn_points
 from .marching_cubes import marching_cubes
 from .ray_mesh import ray_mesh_intersect
@@ -7,6 +8,9 @@ from .subdivide import subdivide_meshes
 
 __all__ = [
     "ball_query",
+    "decimate_mesh",
+    "estimate_point_normals",
+    "icp",
     "knn_gather",
     "knn_points",
     "marching_cubes",
