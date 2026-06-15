@@ -71,6 +71,54 @@ def test_camera_batch_requires_uniform_size():
         pass
 
 
+def _with_distortion(base, distortion, fisheye=False):
+    return Camera(
+        R=base.R,
+        t=base.t,
+        fx=base.fx,
+        fy=base.fy,
+        cx=base.cx,
+        cy=base.cy,
+        width=base.width,
+        height=base.height,
+        distortion=distortion,
+        fisheye=fisheye,
+    )
+
+
+def test_zero_distortion_equals_pinhole():
+    base = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), fov=50.0, width=128, height=128)
+    dcam = _with_distortion(base, (0.0, 0.0, 0.0, 0.0))
+    pts = mx.random.normal((20, 3)) * 0.5
+    xy0, _ = base.project_points(pts)
+    xy1, _ = dcam.project_points(pts)
+    assert_close(xy0, xy1, atol=1e-5)
+
+
+def test_brown_distortion_shifts_pixels_and_ray_roundtrip():
+    base = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), fov=60.0, width=128, height=128)
+    cam = _with_distortion(base, (-0.28, 0.10, 0.001, -0.0005))
+    pts = mx.random.normal((30, 3)) * 0.6
+    # Distortion changes where points land.
+    assert float(mx.abs(base.project_points(pts)[0] - cam.project_points(pts)[0]).max()) > 0.5
+    # Rays are undistorted: a point along a pixel's ray reprojects to that pixel.
+    o, d = cam.generate_rays()
+    i, j = 30, 90
+    pt = (o[i, j] + 2.5 * d[i, j])[None]
+    xy, _ = cam.project_points(pt)
+    assert_close(xy[0], mx.array([j + 0.5, i + 0.5]), atol=0.3)
+
+
+def test_fisheye_ray_project_consistency():
+    base = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), fov=70.0, width=96, height=96)
+    cam = _with_distortion(base, (0.1, -0.02, 0.003, 0.0), fisheye=True)
+    o, d = cam.generate_rays()
+    i, j = 20, 70
+    pt = (o[i, j] + 2.0 * d[i, j])[None]
+    xy, _ = cam.project_points(pt)
+    assert_close(xy[0], mx.array([j + 0.5, i + 0.5]), atol=0.3)
+
+
 def test_look_at_center_projects_to_principal_point():
     cam = Camera.look_at(eye=(0.0, 0.0, -3.0), at=(0, 0, 0), width=640, height=480)
     xy, z = cam.project_points(mx.array([[0.0, 0.0, 0.0]]))
