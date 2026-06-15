@@ -16,10 +16,44 @@ from mlx3d.ops import (
     knn_gather,
     knn_points,
     marching_cubes,
+    ray_mesh_intersect,
     sample_points_from_meshes,
     subdivide_meshes,
 )
+from mlx3d.structures import Meshes
 from mlx3d.utils import cube, ico_sphere, torus
+
+
+def test_ray_mesh_intersect_hit_and_miss():
+    verts = mx.array([[-1.0, -1, 2], [1.0, -1, 2], [0.0, 1, 2]])
+    faces = mx.array([[0, 1, 2]], dtype=mx.int32)
+    m = Meshes([verts], [faces])
+    o = mx.array([[0.0, 0, 0], [5.0, 5, 0]])  # first hits center, second misses
+    d = mx.array([[0.0, 0, 1.0], [0.0, 0, 1.0]])
+    out = ray_mesh_intersect(m, o, d)
+    assert bool(out["hit"][0]) and not bool(out["hit"][1])
+    assert abs(float(out["t"][0]) - 2.0) < 1e-4
+    np.testing.assert_allclose(np.array(out["points"][0]), [0.0, 0.0, 2.0], atol=1e-4)
+    assert int(out["face_idx"][1]) == -1
+
+
+def test_ray_mesh_intersect_nearest_of_two():
+    # Two parallel triangles at z=2 and z=4; ray should hit the nearer (z=2).
+    verts = mx.array(
+        [
+            [-1.0, -1, 2],
+            [1.0, -1, 2],
+            [0.0, 1, 2],
+            [-1.0, -1, 4],
+            [1.0, -1, 4],
+            [0.0, 1, 4],
+        ]
+    )
+    faces = mx.array([[3, 4, 5], [0, 1, 2]], dtype=mx.int32)  # far listed first
+    m = Meshes([verts], [faces])
+    out = ray_mesh_intersect(m, mx.array([[0.0, 0, 0]]), mx.array([[0.0, 0, 1.0]]))
+    assert abs(float(out["t"][0]) - 2.0) < 1e-4
+    assert int(out["face_idx"][0]) == 1  # the nearer triangle
 
 
 def test_subdivide_meshes_counts_and_validity():
@@ -202,8 +236,6 @@ def test_mesh_loss_gradients():
     faces = sphere.faces_list()
 
     def f(verts):
-        from mlx3d.structures import Meshes
-
         m = Meshes([verts], faces)
         return mesh_edge_loss(m) + mesh_laplacian_smoothing(m) + mesh_normal_consistency(m)
 
