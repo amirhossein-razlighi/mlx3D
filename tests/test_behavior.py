@@ -4,6 +4,8 @@ These span multiple modules (cameras + renderers + losses + optimizers) and act
 as integration coverage for the differentiable pipeline.
 """
 
+import time
+
 import mlx.core as mx
 import mlx.nn as nn
 import mlx.optimizers as optim
@@ -11,7 +13,14 @@ import mlx.optimizers as optim
 from mlx3d.cameras import Camera
 from mlx3d.nn import NeRF, render_rays
 from mlx3d.ops import marching_cubes
-from mlx3d.renderer import render_mesh_soft, sample_along_rays, volume_render
+from mlx3d.renderer import (
+    interpolate_face_attributes,
+    rasterize_meshes,
+    render_mesh,
+    render_mesh_soft,
+    sample_along_rays,
+    volume_render,
+)
 from mlx3d.splatting import GaussianModel, GaussianTrainer, TrainerConfig
 from mlx3d.utils import ico_sphere
 
@@ -137,6 +146,64 @@ def test_gaussian_trainer_step_reduces_loss():
     for _ in range(20):
         info = trainer.step(cam, target)
     assert info["loss"] < first
+
+
+def test_hard_rasterizer_faster_than_soft():
+    """The hard z-buffer rasterizer must be substantially faster than the soft one."""
+    mesh = ico_sphere(level=3, radius=1.0)
+    v, f = mesh.verts_packed(), mesh.faces_packed()
+    vc = 0.5 * v + 0.5
+    cam = Camera.look_at(eye=(2.2, 1.6, 2.2), at=(0, 0, 0), fov=45.0, width=160, height=160)
+
+    def hard():
+        frag = rasterize_meshes(cam, v, f)
+        mx.eval(interpolate_face_attributes(frag, vc))
+
+    def soft():
+        mx.eval(render_mesh_soft(cam, mesh, verts_colors=vc, sigma=3e-3)["image"])
+
+    hard()
+    soft()  # warmup / compile
+    t = time.perf_counter()
+    for _ in range(3):
+        hard()
+    th = time.perf_counter() - t
+    t = time.perf_counter()
+    for _ in range(3):
+        soft()
+    ts = time.perf_counter() - t
+    assert th < ts, f"hard ({th:.3f}s) should beat soft ({ts:.3f}s)"
+    # Comfortable margin so the test is meaningful, not just noise.
+    assert ts / th > 3.0
+
+
+def test_render_mesh_color_optimization_reduces_loss():
+    mesh = ico_sphere(level=2, radius=1.0)
+    cam = Camera.look_at(eye=(2.2, 1.6, 2.2), at=(0, 0, 0), fov=45.0, width=48, height=48)
+    target = render_mesh(
+        cam,
+        mesh,
+        verts_colors=mx.full((mesh.verts_packed().shape[0], 3), mx.array([0.2, 0.7, 0.4])),
+        shading="none",
+    )["image"]
+
+    opt = optim.Adam(learning_rate=0.1)
+    color = mx.full((mesh.verts_packed().shape[0], 3), 0.5)
+
+    def loss_fn(c):
+        out = render_mesh(cam, mesh, verts_colors=c, shading="none")
+        return mx.mean((out["image"] - target) ** 2)
+
+    lg = mx.value_and_grad(loss_fn)
+    first = last = None
+    for i in range(25):
+        loss, grad = lg(color)
+        color = opt.apply_gradients({"c": grad}, {"c": color})["c"]
+        mx.eval(color)
+        if i == 0:
+            first = float(loss)
+        last = float(loss)
+    assert last < 0.25 * first
 
 
 def test_marching_cubes_recovers_sphere_extent():
