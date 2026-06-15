@@ -14,6 +14,9 @@ from mlx3d.losses import (
 )
 from mlx3d.ops import (
     ball_query,
+    decimate_mesh,
+    estimate_point_normals,
+    icp,
     knn_gather,
     knn_points,
     marching_cubes,
@@ -22,7 +25,42 @@ from mlx3d.ops import (
     subdivide_meshes,
 )
 from mlx3d.structures import Meshes
+from mlx3d.transforms import so3_exp_map
 from mlx3d.utils import cube, ico_sphere, torus
+
+
+def test_estimate_point_normals_on_sphere():
+    mx.random.seed(0)
+    sph = ico_sphere(level=4, radius=1.0)
+    pts = sample_points_from_meshes(sph, 1500)[0]
+    n = estimate_point_normals(pts, k=16, orient_towards=(0.0, 0.0, 0.0))
+    radial = pts / mx.linalg.norm(pts, axis=-1, keepdims=True)
+    # On a sphere the normal is (anti)parallel to the radial direction.
+    assert float(mx.abs(mx.sum(n * radial, axis=-1)).mean()) > 0.98
+    # Oriented toward the origin -> points inward (n . radial < 0).
+    assert float((mx.sum(n * radial, axis=-1) < 0).mean()) > 0.95
+
+
+def test_icp_recovers_rigid_transform():
+    mx.random.seed(0)
+    src = mx.random.normal((400, 3))
+    r_true = so3_exp_map(mx.array([0.2, -0.3, 0.1]))
+    t_true = mx.array([0.5, -0.2, 0.3])
+    tgt = src @ r_true.T + t_true
+    res = icp(src, tgt, iters=30)
+    assert float(res["rmse"]) < 1e-3
+    np.testing.assert_allclose(np.array(res["aligned"]), np.array(tgt), atol=1e-3)
+
+
+def test_decimate_mesh_reduces_and_stays_valid():
+    big = ico_sphere(level=4, radius=1.0)
+    dec = decimate_mesh(big, voxel_size=0.3)
+    assert dec.verts_packed().shape[0] < big.verts_packed().shape[0]
+    assert dec.faces_packed().shape[0] < big.faces_packed().shape[0]
+    f = np.asarray(dec.faces_packed())
+    assert f.max() < dec.verts_packed().shape[0]
+    # No degenerate faces.
+    assert ((f[:, 0] != f[:, 1]) & (f[:, 1] != f[:, 2]) & (f[:, 0] != f[:, 2])).all()
 
 
 def test_ray_mesh_intersect_hit_and_miss():
