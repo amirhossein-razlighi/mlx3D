@@ -87,6 +87,9 @@ class Camera:
         cx, cy: principal point in pixels.
         width, height: image size in pixels.
         znear, zfar: clipping range used by renderers.
+        orthographic: if ``True``, use an orthographic projection (parallel
+            rays, no perspective divide). ``fx``/``fy`` then act as
+            pixels-per-world-unit instead of focal lengths.
     """
 
     R: mx.array
@@ -99,6 +102,41 @@ class Camera:
     height: int
     znear: float = 0.01
     zfar: float = 100.0
+    orthographic: bool = False
+
+    @classmethod
+    def orthographic_camera(
+        cls,
+        scale: float,
+        width: int,
+        height: int,
+        R: mx.array | None = None,
+        t: mx.array | None = None,
+        **kwargs,
+    ) -> "Camera":
+        """Create an orthographic camera.
+
+        ``scale`` is the world-units half-height of the view volume: the visible
+        region spans ``[-scale, scale]`` vertically in camera space, mapped to
+        the image height (the width follows from the aspect ratio).
+        """
+        ppwu = (height / 2.0) / float(scale)  # pixels per world unit
+        if R is None:
+            R = mx.eye(3)
+        if t is None:
+            t = mx.zeros((3,))
+        return cls(
+            R=R,
+            t=t,
+            fx=ppwu,
+            fy=ppwu,
+            cx=width / 2.0,
+            cy=height / 2.0,
+            width=width,
+            height=height,
+            orthographic=True,
+            **kwargs,
+        )
 
     @classmethod
     def from_fov(
@@ -191,6 +229,10 @@ class Camera:
         """
         pc = self.world_to_camera(points)
         z = pc[..., 2]
+        if self.orthographic:
+            u = self.fx * pc[..., 0] + self.cx
+            v = self.fy * pc[..., 1] + self.cy
+            return mx.stack([u, v], axis=-1), z
         inv_z = 1.0 / mx.where(mx.abs(z) < eps, mx.full(z.shape, eps), z)
         u = self.fx * pc[..., 0] * inv_z + self.cx
         v = self.fy * pc[..., 1] * inv_z + self.cy
@@ -198,6 +240,10 @@ class Camera:
 
     def unproject_points(self, xy: mx.array, depth: mx.array) -> mx.array:
         """Lift pixel coordinates ``(..., 2)`` with z-depths ``(...,)`` back to world points."""
+        if self.orthographic:
+            x = (xy[..., 0] - self.cx) / self.fx
+            y = (xy[..., 1] - self.cy) / self.fy
+            return self.camera_to_world(mx.stack([x, y, depth], axis=-1))
         x = (xy[..., 0] - self.cx) / self.fx * depth
         y = (xy[..., 1] - self.cy) / self.fy * depth
         return self.camera_to_world(mx.stack([x, y, depth], axis=-1))
@@ -213,10 +259,18 @@ class Camera:
         v = mx.arange(self.height, dtype=mx.float32) + 0.5
         uu = mx.broadcast_to(u[None, :], (self.height, self.width))
         vv = mx.broadcast_to(v[:, None], (self.height, self.width))
-        dirs_cam = mx.stack(
-            [(uu - self.cx) / self.fx, (vv - self.cy) / self.fy, mx.ones_like(uu)],
-            axis=-1,
-        )
+        xc = (uu - self.cx) / self.fx
+        yc = (vv - self.cy) / self.fy
+        if self.orthographic:
+            # Parallel rays: shared forward direction, per-pixel origins on the
+            # image plane (z = 0 in camera space).
+            zeros = mx.zeros_like(uu)
+            origins = self.camera_to_world(mx.stack([xc, yc, zeros], axis=-1))
+            fwd = mx.array([0.0, 0.0, 1.0]) @ self.R
+            fwd = fwd / mx.linalg.norm(fwd)
+            dirs_world = mx.broadcast_to(fwd, origins.shape)
+            return origins, dirs_world
+        dirs_cam = mx.stack([xc, yc, mx.ones_like(uu)], axis=-1)
         dirs_world = dirs_cam @ self.R  # == dirs_cam @ R^-T == R^T applied per-vector
         dirs_world = dirs_world / mx.linalg.norm(dirs_world, axis=-1, keepdims=True)
         origins = mx.broadcast_to(self.camera_center, dirs_world.shape)

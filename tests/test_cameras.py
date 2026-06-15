@@ -62,3 +62,34 @@ def test_fov_focal():
     cam = Camera.from_fov(90.0, width=200, height=100)
     assert abs(cam.fy - 50.0) < 1e-4
     assert abs(math.degrees(cam.fov_y) - 90.0) < 1e-4
+
+
+def test_orthographic_projection_is_parallel():
+    R, t = look_at(mx.array([0.0, 0.0, -3.0]), mx.array([0.0, 0.0, 0.0]), mx.array([0.0, 1.0, 0.0]))
+    cam = Camera.orthographic_camera(scale=1.0, width=64, height=64, R=R, t=t)
+    assert cam.orthographic
+    # Points with the same camera-space xy project to the same pixel regardless of depth.
+    pts = mx.array([[0.3, 0.2, 0.0], [0.3, 0.2, 0.8], [0.3, 0.2, -0.5]])
+    xy, z = cam.project_points(pts)
+    assert_close(xy[0], xy[1], atol=1e-4)
+    assert_close(xy[0], xy[2], atol=1e-4)
+    # The principal point images the camera-space origin to the image center.
+    xy0, _ = cam.project_points(mx.array([[0.0, 0.0, 1.0]]))
+    assert_close(xy0[0], mx.array([32.0, 32.0]), atol=1e-4)
+
+
+def test_orthographic_rays_are_parallel_with_varying_origins():
+    R, t = look_at(mx.array([0.0, 0.0, -3.0]), mx.array([0.0, 0.0, 0.0]), mx.array([0.0, 1.0, 0.0]))
+    cam = Camera.orthographic_camera(scale=1.0, width=32, height=32, R=R, t=t)
+    o, d = cam.generate_rays()
+    assert_close(d[0, 0], d[31, 31], atol=1e-5)  # parallel
+    assert float(mx.abs(o[0, 0] - o[31, 31]).max()) > 0.1  # but origins differ
+
+
+def test_orthographic_unproject_roundtrip():
+    R, t = look_at(mx.array([0.0, 0.0, -3.0]), mx.array([0.0, 0.0, 0.0]), mx.array([0.0, 1.0, 0.0]))
+    cam = Camera.orthographic_camera(scale=1.5, width=48, height=48, R=R, t=t)
+    pts = mx.array([[0.4, -0.3, 0.2]])
+    xy, z = cam.project_points(pts)
+    back = cam.unproject_points(xy[0], z[0])
+    assert_close(back, pts[0], atol=1e-4)
