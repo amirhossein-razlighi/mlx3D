@@ -165,3 +165,6 @@ site/
 outputs/
 *cache/
 *data*/
+
+# Local planning notes
+TODO.md
