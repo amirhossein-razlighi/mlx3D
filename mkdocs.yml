@@ -62,6 +62,7 @@ nav:
       - Quickstart: quickstart.md
       - Conventions: conventions.md
       - Interactive Viewer: viewer.md
+      - Benchmarks: benchmarks.md
   - Tutorials:
       - Mesh Optimization: tutorials/mesh_optimization.md
       - Mesh Rendering and Extraction: tutorials/mesh_rendering.md
