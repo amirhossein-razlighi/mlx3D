@@ -59,6 +59,20 @@ Shading is **two-sided** by default: each normal is oriented toward the camera
 before lighting, so meshes with inward or inconsistent winding (very common in
 the wild) still light correctly instead of rendering black.
 
+## Antialiasing and render passes
+
+Pass `ssaa=N` to supersample (render at `N x` resolution and box-downsample) for
+clean, antialiased silhouettes. `render_mesh` also returns extra render passes
+(AOVs) alongside the image: `depth`, `normals`, `position` (world-space hit
+point) and `face_id` (nearest face index, `-1` where empty).
+
+```python
+out = render_mesh(camera, mesh, ssaa=3)   # antialiased
+seg = out["face_id"]                        # per-pixel face index
+```
+
+<p align="center"><img src="../../assets/render_aa.png" width="40%" /></p>
+
 ## Textured meshes
 
 Pass a `texture` plus UV coordinates to shade from an image instead of vertex
