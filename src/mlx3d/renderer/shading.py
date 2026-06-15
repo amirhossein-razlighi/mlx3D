@@ -177,7 +177,7 @@ def render_mesh(
     Returns:
         ``{"image", "alpha", "depth", "normals"}``.
     """
-    mesh = mesh_or_verts if isinstance(mesh_or_verts, Meshes) else Meshes(mesh_or_verts, faces)
+    mesh = mesh_or_verts if isinstance(mesh_or_verts, Meshes) else Meshes([mesh_or_verts], [faces])
     verts = mesh.verts_packed()
     if verts_colors is None:
         verts_colors = mx.full((verts.shape[0], 3), 0.7)
