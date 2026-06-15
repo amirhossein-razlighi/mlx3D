@@ -100,6 +100,33 @@ def test_render_mesh_outputs_and_no_nan():
     assert float(mx.where(covered, out["depth"], 1.0).min()) > 0.0
 
 
+def test_render_mesh_aovs_present():
+    mesh = ico_sphere(level=3, radius=1.0)
+    cam = Camera.look_at(eye=(2.4, 1.8, 2.4), at=(0, 0, 0), fov=45.0, width=48, height=48)
+    out = render_mesh(cam, mesh)
+    for k in ("image", "alpha", "depth", "normals", "position", "face_id"):
+        assert k in out
+    assert out["position"].shape == (48, 48, 3)
+    assert out["face_id"].shape == (48, 48)
+    # face_id is -1 on empty pixels and a valid index where covered.
+    fid = np.array(out["face_id"])
+    assert fid.min() == -1
+    assert fid.max() < mesh.faces_packed().shape[0]
+
+
+def test_ssaa_antialiases_edges():
+    mesh = ico_sphere(level=4, radius=1.0)
+    cam = Camera.look_at(eye=(2.4, 1.8, 2.4), at=(0, 0, 0), fov=45.0, width=96, height=96)
+    out1 = render_mesh(cam, mesh, ssaa=1)
+    out3 = render_mesh(cam, mesh, ssaa=3)
+    assert out1["image"].shape == out3["image"].shape == (96, 96, 3)
+    # Supersampling introduces fractional coverage at silhouette edges.
+    a1, a3 = np.array(out1["alpha"]), np.array(out3["alpha"])
+    soft1 = ((a1 > 0.01) & (a1 < 0.99)).mean()
+    soft3 = ((a3 > 0.01) & (a3 < 0.99)).mean()
+    assert soft3 > soft1
+
+
 def test_two_sided_shading_lights_inward_wound_mesh():
     # The torus primitive winds normals inward; two-sided shading must still
     # light its camera-facing surface rather than render it black.

@@ -164,11 +164,17 @@ def render_mesh(
     specular_strength: float = 0.3,
     background: tuple[float, float, float] | float = 0.0,
     shading: str = "phong",
+    ssaa: int = 1,
 ) -> RenderOutput:
     """Render a mesh with the hard rasterizer and Blinn-Phong lighting.
 
     Albedo comes from a UV texture when ``texture`` is given, otherwise from
-    ``verts_colors`` (default mid-grey).
+    ``verts_colors`` (default mid-grey). ``ssaa > 1`` supersamples (renders at
+    ``ssaa x`` resolution and box-downsamples) for antialiased edges.
+
+    Besides ``image``/``alpha``/``depth``/``normals`` the result includes render
+    passes (AOVs): ``position`` (``(H, W, 3)`` world-space hit point) and
+    ``face_id`` (``(H, W)`` nearest-face index, ``-1`` where empty).
 
     Args:
         camera: viewing camera.
@@ -187,10 +193,30 @@ def render_mesh(
     Returns:
         ``{"image", "alpha", "depth", "normals"}``.
     """
+    if ssaa > 1:
+        big = _scale_camera(camera, ssaa)
+        hi = render_mesh(
+            big,
+            mesh_or_verts,
+            faces,
+            verts_colors,
+            texture,
+            verts_uvs,
+            faces_uvs,
+            lights,
+            shininess,
+            specular_strength,
+            background,
+            shading,
+            ssaa=1,
+        )
+        return _downsample_passes(hi, ssaa)
+
     mesh = mesh_or_verts if isinstance(mesh_or_verts, Meshes) else Meshes([mesh_or_verts], [faces])
     verts = mesh.verts_packed()
 
     frag = rasterize_meshes(camera, mesh)
+    positions = interpolate_face_attributes(frag, verts)  # world-space AOV
     if texture is not None:
         if verts_uvs is None or faces_uvs is None:
             raise ValueError("verts_uvs and faces_uvs are required with a texture.")
@@ -213,7 +239,6 @@ def render_mesh(
                 DirectionalLights(direction=(-1.0, -1.0, -0.6), color=(1.0, 1.0, 1.0)),
                 AmbientLights(color=(0.25, 0.25, 0.25)),
             ]
-        positions = interpolate_face_attributes(frag, verts)
         vnormals = mesh.verts_normals_packed()
         normals_px = interpolate_face_attributes(frag, vnormals)
         normals_px = normals_px / mx.maximum(
@@ -240,4 +265,52 @@ def render_mesh(
     if bg.ndim == 0:
         bg = mx.broadcast_to(bg, (3,))
     image = image * alpha[..., None] + bg * (1.0 - alpha[..., None])
-    return {"image": image, "alpha": alpha, "depth": frag.zbuf, "normals": normals_px}
+    return {
+        "image": image,
+        "alpha": alpha,
+        "depth": frag.zbuf,
+        "normals": normals_px,
+        "position": positions,
+        "face_id": frag.pix_to_face,
+    }
+
+
+def _scale_camera(camera: Camera, s: int) -> Camera:
+    """A copy of ``camera`` at ``s x`` resolution (intrinsics scaled to match)."""
+    return Camera(
+        R=camera.R,
+        t=camera.t,
+        fx=camera.fx * s,
+        fy=camera.fy * s,
+        cx=camera.cx * s,
+        cy=camera.cy * s,
+        width=camera.width * s,
+        height=camera.height * s,
+        znear=camera.znear,
+        zfar=camera.zfar,
+        orthographic=camera.orthographic,
+        distortion=camera.distortion,
+        fisheye=camera.fisheye,
+    )
+
+
+def _box_downsample(x: mx.array, s: int) -> mx.array:
+    """Average non-overlapping ``s x s`` blocks of a ``(H, W, ...)`` array."""
+    h, w = x.shape[:2]
+    tail = x.shape[2:]
+    x = x.reshape(h // s, s, w // s, s, *tail)
+    return x.mean(axis=(1, 3))
+
+
+def _downsample_passes(passes: RenderOutput, s: int) -> RenderOutput:
+    """Box-downsample supersampled passes; face_id is nearest-sampled."""
+    out: RenderOutput = {}
+    for k, v in passes.items():
+        if k == "face_id":
+            out[k] = v[::s, ::s]  # discrete label: pick the block's top-left
+        elif k == "normals":
+            n = _box_downsample(v, s)
+            out[k] = n / mx.maximum(mx.linalg.norm(n, axis=-1, keepdims=True), 1e-8)
+        else:
+            out[k] = _box_downsample(v, s)
+    return out
