@@ -3,9 +3,11 @@ import numpy as np
 
 from mlx3d.losses import (
     chamfer_distance,
+    closest_point_on_triangle,
     mesh_edge_loss,
     mesh_laplacian_smoothing,
     mesh_normal_consistency,
+    point_mesh_face_distance,
     psnr,
     ssim,
 )
@@ -17,6 +19,31 @@ from mlx3d.ops import (
     sample_points_from_meshes,
 )
 from mlx3d.utils import cube, ico_sphere, torus
+
+
+def test_closest_point_on_triangle_regions():
+    a = mx.array([0.0, 0.0, 0.0])
+    b = mx.array([1.0, 0.0, 0.0])
+    c = mx.array([0.0, 1.0, 0.0])
+    # Point above the interior projects to its in-plane location.
+    p = mx.array([0.25, 0.25, 1.0])
+    cp = closest_point_on_triangle(p, a, b, c)
+    np.testing.assert_allclose(np.array(cp), [0.25, 0.25, 0.0], atol=1e-5)
+    # Point past vertex a clamps to a.
+    cp2 = closest_point_on_triangle(mx.array([-1.0, -1.0, 0.0]), a, b, c)
+    np.testing.assert_allclose(np.array(cp2), [0.0, 0.0, 0.0], atol=1e-5)
+    # Point beyond edge AB midpoint clamps onto the edge.
+    cp3 = closest_point_on_triangle(mx.array([0.5, -1.0, 0.0]), a, b, c)
+    np.testing.assert_allclose(np.array(cp3), [0.5, 0.0, 0.0], atol=1e-5)
+
+
+def test_point_mesh_face_distance_zero_on_surface():
+    mesh = ico_sphere(level=3, radius=1.0)
+    surf = sample_points_from_meshes(mesh, 400)[0]
+    d_on = float(point_mesh_face_distance(mesh, surf))
+    d_far = float(point_mesh_face_distance(mesh, surf * 1.5))
+    assert d_on < 1e-3  # sampled surface points sit on faces
+    assert d_far > 0.1  # scaled-out points are clearly off-surface
 
 
 def test_ball_query_keeps_in_radius_neighbors():
