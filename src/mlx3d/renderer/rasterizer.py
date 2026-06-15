@@ -143,9 +143,7 @@ def rasterize_meshes(
     centroid = mx.mean(sxy, axis=1)  # (F, 2)
     radii = mx.sqrt(mx.max(mx.sum((sxy - centroid[:, None, :]) ** 2, axis=-1), axis=1))
     depths = mx.mean(mx.stop_gradient(tri_z), axis=1)  # (F,) for tile sort order
-    sorted_ids, tile_ranges, tiles_x, tiles_y = bin_gaussians(
-        centroid, radii, depths, w, h
-    )
+    sorted_ids, tile_ranges, tiles_x, tiles_y = bin_gaussians(centroid, radii, depths, w, h)
 
     params = mx.array([w, h, tiles_x], dtype=mx.int32)
     znear_arr = mx.array([float(camera.znear)], dtype=mx.float32)
