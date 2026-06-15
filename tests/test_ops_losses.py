@@ -9,8 +9,28 @@ from mlx3d.losses import (
     psnr,
     ssim,
 )
-from mlx3d.ops import knn_gather, knn_points, marching_cubes, sample_points_from_meshes
+from mlx3d.ops import (
+    ball_query,
+    knn_gather,
+    knn_points,
+    marching_cubes,
+    sample_points_from_meshes,
+)
 from mlx3d.utils import cube, ico_sphere, torus
+
+
+def test_ball_query_keeps_in_radius_neighbors():
+    p2 = mx.array([[0.0, 0, 0], [0.1, 0, 0], [0.5, 0, 0], [2.0, 0, 0], [0.2, 0.1, 0]])
+    p1 = mx.array([[0.0, 0, 0]])
+    # radius 0.3: points 0 (0.0), 1 (0.1), 4 (~0.224) are in; 2 (0.5) and 3 (2.0) are out.
+    dists, idx = ball_query(p1, p2, K=4, radius=0.3)
+    ids = [int(i) for i in idx[0]]
+    assert ids[:3] == [0, 1, 4]
+    assert ids[3] == -1  # only three neighbors within radius
+    assert not np.isfinite(float(dists[0, 3]))  # empty slot distance is inf
+    # Distances are sorted ascending for the filled slots.
+    filled = [float(dists[0, k]) for k in range(3)]
+    assert filled == sorted(filled)
 
 
 def assert_close(a, b, atol=1e-5):
