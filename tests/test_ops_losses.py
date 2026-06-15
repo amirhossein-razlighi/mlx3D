@@ -17,8 +17,30 @@ from mlx3d.ops import (
     knn_points,
     marching_cubes,
     sample_points_from_meshes,
+    subdivide_meshes,
 )
 from mlx3d.utils import cube, ico_sphere, torus
+
+
+def test_subdivide_meshes_counts_and_validity():
+    m = ico_sphere(level=2, radius=1.0)
+    v, f, e = (
+        m.verts_packed().shape[0],
+        m.faces_packed().shape[0],
+        m.edges_packed().shape[0],
+    )
+    sub = subdivide_meshes(m)
+    # Each face -> 4; one new vertex per unique edge.
+    assert sub.faces_packed().shape[0] == 4 * f
+    assert sub.verts_packed().shape[0] == v + e
+    # No degenerate faces.
+    f2 = sub.faces_packed()
+    degenerate = mx.sum((f2[:, 0] == f2[:, 1]) | (f2[:, 1] == f2[:, 2]) | (f2[:, 0] == f2[:, 2]))
+    assert int(degenerate) == 0
+    # Original vertices are preserved as the first V rows.
+    np.testing.assert_allclose(
+        np.array(sub.verts_packed()[:v]), np.array(m.verts_packed()), atol=1e-6
+    )
 
 
 def test_closest_point_on_triangle_regions():
