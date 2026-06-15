@@ -7,6 +7,7 @@ from mlx3d.losses import (
     mesh_edge_loss,
     mesh_laplacian_smoothing,
     mesh_normal_consistency,
+    ms_ssim,
     point_mesh_face_distance,
     psnr,
     ssim,
@@ -271,3 +272,31 @@ def test_ssim_gradient():
 
     g = mx.grad(f)(mx.random.uniform(shape=(16, 16, 3)))
     assert not bool(mx.isnan(g).any())
+
+
+def test_ms_ssim_monotonic_and_differentiable():
+    mx.random.seed(0)
+    img = mx.random.uniform(shape=(200, 200, 3))
+    assert abs(float(ms_ssim(img, img)) - 1.0) < 1e-4  # identical -> 1
+    # More degradation -> lower MS-SSIM.
+    vals = [
+        float(ms_ssim(img, mx.clip(img + mx.random.normal(img.shape) * s, 0.0, 1.0)))
+        for s in (0.05, 0.15, 0.4)
+    ]
+    assert all(vals[i] > vals[i + 1] for i in range(len(vals) - 1))
+    assert vals[-1] < 0.95
+
+    def loss(x):
+        return 1.0 - ms_ssim(x, img)
+
+    g = mx.grad(loss)(mx.clip(img + 0.1, 0, 1))
+    assert not bool(mx.isnan(g).any())
+
+
+def test_ms_ssim_small_image_raises():
+    small = mx.zeros((32, 32, 3))
+    try:
+        ms_ssim(small, small)
+        raise AssertionError("expected ValueError for too-small image")
+    except ValueError:
+        pass
