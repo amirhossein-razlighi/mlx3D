@@ -21,6 +21,7 @@ from mlx3d.ops import (
     knn_gather,
     knn_points,
     marching_cubes,
+    poisson_reconstruction,
     ray_mesh_intersect,
     sample_points_from_meshes,
     subdivide_meshes,
@@ -28,6 +29,21 @@ from mlx3d.ops import (
 from mlx3d.structures import Meshes
 from mlx3d.transforms import so3_exp_map
 from mlx3d.utils import cube, ico_sphere, torus
+
+
+def test_poisson_reconstruction_recovers_sphere():
+    mx.random.seed(0)
+    sph = ico_sphere(level=4, radius=1.0)
+    pts = sample_points_from_meshes(sph, 3000)[0]
+    # Outward normals (orient toward origin gives inward, so negate).
+    nrm = -estimate_point_normals(pts, k=16, orient_towards=(0.0, 0.0, 0.0))
+    mesh = poisson_reconstruction(pts, nrm, resolution=48)
+    v = mesh.verts_packed()
+    assert v.shape[0] > 0 and mesh.faces_packed().shape[0] > 0
+    r = mx.linalg.norm(v, axis=-1)
+    # Reconstructed surface sits on the unit sphere.
+    assert abs(float(r.mean()) - 1.0) < 0.05
+    assert float(r.std()) < 0.1
 
 
 def test_estimate_point_normals_on_sphere():
