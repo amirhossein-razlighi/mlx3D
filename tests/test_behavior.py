@@ -11,7 +11,7 @@ import mlx.nn as nn
 import mlx.optimizers as optim
 
 from mlx3d.cameras import Camera, refine_camera
-from mlx3d.nn import HashGridNeRF, NeRF, render_rays
+from mlx3d.nn import HashGridNeRF, NeRF, OccupancyGrid, render_rays, render_rays_occupancy
 from mlx3d.ops import marching_cubes
 from mlx3d.renderer import (
     interpolate_face_attributes,
@@ -207,6 +207,39 @@ def test_hard_rasterizer_faster_than_soft():
     assert th < ts, f"hard ({th:.3f}s) should beat soft ({ts:.3f}s)"
     # Comfortable margin so the test is meaningful, not just noise.
     assert ts / th > 3.0
+
+
+def test_occupancy_skipping_faster_than_dense():
+    """Empty-space skipping must beat dense NeRF rendering on a sparse scene."""
+    model = NeRF(hidden_dim=128, num_layers=6)  # heavy enough that MLP dominates
+    o = mx.random.normal((512, 3))
+    d = mx.random.normal((512, 3))
+    d = d / mx.linalg.norm(d, axis=-1, keepdims=True)
+    grid = OccupancyGrid(resolution=64, bounds=(-1.5, 1.5))
+    grid.update(lambda p: mx.where(mx.linalg.norm(p, axis=-1) < 0.5, 10.0, 0.0), threshold=1.0)
+
+    def dense():
+        mx.eval(render_rays(model, o, d, 2.0, 6.0, num_coarse=64)["rgb"])
+
+    def skip():
+        mx.eval(
+            render_rays_occupancy(model, o, d, 2.0, 6.0, grid, num_samples=64, eval_fraction=0.15)[
+                "rgb"
+            ]
+        )
+
+    dense()
+    skip()  # warmup
+    t = time.perf_counter()
+    for _ in range(5):
+        dense()
+    td = time.perf_counter() - t
+    t = time.perf_counter()
+    for _ in range(5):
+        skip()
+    ts = time.perf_counter() - t
+    assert ts < td, f"occupancy skip ({ts:.3f}s) should beat dense ({td:.3f}s)"
+    assert td / ts > 1.5
 
 
 def test_render_mesh_color_optimization_reduces_loss():
