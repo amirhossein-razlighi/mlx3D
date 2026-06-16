@@ -15,11 +15,22 @@ from .rotations import (
     rotation_6d_to_matrix,
     standardize_quaternion,
 )
+from .se3 import (
+    Transform3d,
+    hat,
+    se3_exp_map,
+    se3_log_map,
+    so3_exp_map,
+    so3_log_map,
+    vee,
+)
 
 __all__ = [
+    "Transform3d",
     "axis_angle_to_matrix",
     "axis_angle_to_quaternion",
     "euler_angles_to_matrix",
+    "hat",
     "matrix_to_axis_angle",
     "matrix_to_quaternion",
     "matrix_to_rotation_6d",
@@ -31,5 +42,10 @@ __all__ = [
     "random_quaternions",
     "random_rotations",
     "rotation_6d_to_matrix",
+    "se3_exp_map",
+    "se3_log_map",
+    "so3_exp_map",
+    "so3_log_map",
     "standardize_quaternion",
+    "vee",
 ]

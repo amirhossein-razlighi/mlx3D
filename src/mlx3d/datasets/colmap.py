@@ -22,7 +22,7 @@ class ColmapDataset:
     cameras: list[Camera]
     images: ImageCollection
     image_names: list[str]
-    points: mx.array        # (P, 3) SfM points
+    points: mx.array  # (P, 3) SfM points
     point_colors: mx.array  # (P, 3) in [0, 1]
 
     def __len__(self) -> int:
@@ -44,9 +44,12 @@ def _read_cameras_bin(path: str) -> dict[int, dict]:
     cameras = {}
     # COLMAP camera models: id -> (name, num_params)
     models = {
-        0: ("SIMPLE_PINHOLE", 3), 1: ("PINHOLE", 4),
-        2: ("SIMPLE_RADIAL", 4), 3: ("RADIAL", 5),
-        4: ("OPENCV", 8), 5: ("OPENCV_FISHEYE", 8),
+        0: ("SIMPLE_PINHOLE", 3),
+        1: ("PINHOLE", 4),
+        2: ("SIMPLE_RADIAL", 4),
+        3: ("RADIAL", 5),
+        4: ("OPENCV", 8),
+        5: ("OPENCV_FISHEYE", 8),
     }
     with open(path, "rb") as f:
         num = struct.unpack("<Q", f.read(8))[0]
@@ -78,8 +81,10 @@ def _read_images_bin(path: str) -> dict[int, dict]:
             num_points = struct.unpack("<Q", f.read(8))[0]
             f.read(24 * num_points)  # skip 2D points
             images[image_id] = {
-                "qvec": np.array(qvec), "tvec": np.array(tvec),
-                "camera_id": camera_id, "name": name.decode("utf-8"),
+                "qvec": np.array(qvec),
+                "tvec": np.array(tvec),
+                "camera_id": camera_id,
+                "name": name.decode("utf-8"),
             }
     return images
 
@@ -150,16 +155,31 @@ def load_colmap(
     for _, meta in sorted(imgs_meta.items(), key=lambda kv: kv[1]["name"]):
         cam = cams_meta[meta["camera_id"]]
         params = cam["params"]
-        if cam["model"] == "SIMPLE_PINHOLE":
+        distortion = None
+        fisheye = False
+        model = cam["model"]
+        if model == "SIMPLE_PINHOLE":
             fx = fy = params[0]
             cx, cy = params[1], params[2]
-        elif cam["model"] in ("PINHOLE", "OPENCV", "OPENCV_FISHEYE"):
+        elif model == "PINHOLE":
             fx, fy, cx, cy = params[:4]
-        elif cam["model"] in ("SIMPLE_RADIAL", "RADIAL"):
+        elif model == "SIMPLE_RADIAL":
             fx = fy = params[0]
             cx, cy = params[1], params[2]
+            distortion = (params[3], 0.0, 0.0, 0.0)
+        elif model == "RADIAL":
+            fx = fy = params[0]
+            cx, cy = params[1], params[2]
+            distortion = (params[3], params[4], 0.0, 0.0)
+        elif model == "OPENCV":
+            fx, fy, cx, cy = params[:4]
+            distortion = tuple(params[4:8])  # k1, k2, p1, p2
+        elif model == "OPENCV_FISHEYE":
+            fx, fy, cx, cy = params[:4]
+            distortion = tuple(params[4:8])  # k1, k2, k3, k4
+            fisheye = True
         else:  # pragma: no cover
-            raise ValueError(f"Unsupported camera model {cam['model']}")
+            raise ValueError(f"Unsupported camera model {model}")
 
         image_path = os.path.join(root, images_dir, meta["name"])
         file_size = _image_size(image_path)
@@ -178,8 +198,14 @@ def load_colmap(
             Camera(
                 R=mx.array(R.astype(np.float32)),
                 t=mx.array(t.astype(np.float32)),
-                fx=fx * sx, fy=fy * sy, cx=cx * sx, cy=cy * sy,
-                width=int(W), height=int(H),
+                fx=fx * sx,
+                fy=fy * sy,
+                cx=cx * sx,
+                cy=cy * sy,
+                width=int(W),
+                height=int(H),
+                distortion=distortion,
+                fisheye=fisheye,
             )
         )
         if load_images:

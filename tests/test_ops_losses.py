@@ -3,14 +3,118 @@ import numpy as np
 
 from mlx3d.losses import (
     chamfer_distance,
+    closest_point_on_triangle,
     mesh_edge_loss,
     mesh_laplacian_smoothing,
     mesh_normal_consistency,
+    ms_ssim,
+    point_mesh_face_distance,
     psnr,
     ssim,
 )
-from mlx3d.ops import knn_gather, knn_points, marching_cubes, sample_points_from_meshes
+from mlx3d.ops import (
+    ball_query,
+    knn_gather,
+    knn_points,
+    marching_cubes,
+    ray_mesh_intersect,
+    sample_points_from_meshes,
+    subdivide_meshes,
+)
+from mlx3d.structures import Meshes
 from mlx3d.utils import cube, ico_sphere, torus
+
+
+def test_ray_mesh_intersect_hit_and_miss():
+    verts = mx.array([[-1.0, -1, 2], [1.0, -1, 2], [0.0, 1, 2]])
+    faces = mx.array([[0, 1, 2]], dtype=mx.int32)
+    m = Meshes([verts], [faces])
+    o = mx.array([[0.0, 0, 0], [5.0, 5, 0]])  # first hits center, second misses
+    d = mx.array([[0.0, 0, 1.0], [0.0, 0, 1.0]])
+    out = ray_mesh_intersect(m, o, d)
+    assert bool(out["hit"][0]) and not bool(out["hit"][1])
+    assert abs(float(out["t"][0]) - 2.0) < 1e-4
+    np.testing.assert_allclose(np.array(out["points"][0]), [0.0, 0.0, 2.0], atol=1e-4)
+    assert int(out["face_idx"][1]) == -1
+
+
+def test_ray_mesh_intersect_nearest_of_two():
+    # Two parallel triangles at z=2 and z=4; ray should hit the nearer (z=2).
+    verts = mx.array(
+        [
+            [-1.0, -1, 2],
+            [1.0, -1, 2],
+            [0.0, 1, 2],
+            [-1.0, -1, 4],
+            [1.0, -1, 4],
+            [0.0, 1, 4],
+        ]
+    )
+    faces = mx.array([[3, 4, 5], [0, 1, 2]], dtype=mx.int32)  # far listed first
+    m = Meshes([verts], [faces])
+    out = ray_mesh_intersect(m, mx.array([[0.0, 0, 0]]), mx.array([[0.0, 0, 1.0]]))
+    assert abs(float(out["t"][0]) - 2.0) < 1e-4
+    assert int(out["face_idx"][0]) == 1  # the nearer triangle
+
+
+def test_subdivide_meshes_counts_and_validity():
+    m = ico_sphere(level=2, radius=1.0)
+    v, f, e = (
+        m.verts_packed().shape[0],
+        m.faces_packed().shape[0],
+        m.edges_packed().shape[0],
+    )
+    sub = subdivide_meshes(m)
+    # Each face -> 4; one new vertex per unique edge.
+    assert sub.faces_packed().shape[0] == 4 * f
+    assert sub.verts_packed().shape[0] == v + e
+    # No degenerate faces.
+    f2 = sub.faces_packed()
+    degenerate = mx.sum((f2[:, 0] == f2[:, 1]) | (f2[:, 1] == f2[:, 2]) | (f2[:, 0] == f2[:, 2]))
+    assert int(degenerate) == 0
+    # Original vertices are preserved as the first V rows.
+    np.testing.assert_allclose(
+        np.array(sub.verts_packed()[:v]), np.array(m.verts_packed()), atol=1e-6
+    )
+
+
+def test_closest_point_on_triangle_regions():
+    a = mx.array([0.0, 0.0, 0.0])
+    b = mx.array([1.0, 0.0, 0.0])
+    c = mx.array([0.0, 1.0, 0.0])
+    # Point above the interior projects to its in-plane location.
+    p = mx.array([0.25, 0.25, 1.0])
+    cp = closest_point_on_triangle(p, a, b, c)
+    np.testing.assert_allclose(np.array(cp), [0.25, 0.25, 0.0], atol=1e-5)
+    # Point past vertex a clamps to a.
+    cp2 = closest_point_on_triangle(mx.array([-1.0, -1.0, 0.0]), a, b, c)
+    np.testing.assert_allclose(np.array(cp2), [0.0, 0.0, 0.0], atol=1e-5)
+    # Point beyond edge AB midpoint clamps onto the edge.
+    cp3 = closest_point_on_triangle(mx.array([0.5, -1.0, 0.0]), a, b, c)
+    np.testing.assert_allclose(np.array(cp3), [0.5, 0.0, 0.0], atol=1e-5)
+
+
+def test_point_mesh_face_distance_zero_on_surface():
+    mesh = ico_sphere(level=3, radius=1.0)
+    surf = sample_points_from_meshes(mesh, 400)[0]
+    d_on = float(point_mesh_face_distance(mesh, surf))
+    d_far = float(point_mesh_face_distance(mesh, surf * 1.5))
+    assert d_on < 1e-3  # sampled surface points sit on faces
+    assert d_far > 0.1  # scaled-out points are clearly off-surface
+
+
+def test_ball_query_keeps_in_radius_neighbors():
+    p2 = mx.array([[0.0, 0, 0], [0.1, 0, 0], [0.5, 0, 0], [2.0, 0, 0], [0.2, 0.1, 0]])
+    p1 = mx.array([[0.0, 0, 0]])
+    # radius 0.3: points 0 (0.0), 1 (0.1), 4 (~0.224) are in; 2 (0.5) and 3 (2.0) are out.
+    dists, idx = ball_query(p1, p2, K=4, radius=0.3)
+    ids = [int(i) for i in idx[0]]
+    assert ids[:3] == [0, 1, 4]
+    assert ids[3] == -1  # only three neighbors within radius
+    assert not np.isfinite(float(dists[0, 3]))  # empty slot distance is inf
+    # Distances are sorted ascending for the filled slots.
+    filled = [float(dists[0, k]) for k in range(3)]
+    assert filled == sorted(filled)
 
 
 def assert_close(a, b, atol=1e-5):
@@ -133,8 +237,6 @@ def test_mesh_loss_gradients():
     faces = sphere.faces_list()
 
     def f(verts):
-        from mlx3d.structures import Meshes
-
         m = Meshes([verts], faces)
         return mesh_edge_loss(m) + mesh_laplacian_smoothing(m) + mesh_normal_consistency(m)
 
@@ -170,3 +272,31 @@ def test_ssim_gradient():
 
     g = mx.grad(f)(mx.random.uniform(shape=(16, 16, 3)))
     assert not bool(mx.isnan(g).any())
+
+
+def test_ms_ssim_monotonic_and_differentiable():
+    mx.random.seed(0)
+    img = mx.random.uniform(shape=(200, 200, 3))
+    assert abs(float(ms_ssim(img, img)) - 1.0) < 1e-4  # identical -> 1
+    # More degradation -> lower MS-SSIM.
+    vals = [
+        float(ms_ssim(img, mx.clip(img + mx.random.normal(img.shape) * s, 0.0, 1.0)))
+        for s in (0.05, 0.15, 0.4)
+    ]
+    assert all(vals[i] > vals[i + 1] for i in range(len(vals) - 1))
+    assert vals[-1] < 0.95
+
+    def loss(x):
+        return 1.0 - ms_ssim(x, img)
+
+    g = mx.grad(loss)(mx.clip(img + 0.1, 0, 1))
+    assert not bool(mx.isnan(g).any())
+
+
+def test_ms_ssim_small_image_raises():
+    small = mx.zeros((32, 32, 3))
+    try:
+        ms_ssim(small, small)
+        raise AssertionError("expected ValueError for too-small image")
+    except ValueError:
+        pass

@@ -18,12 +18,14 @@ Apple-Silicon Mac — ideal for a first look or for CI.
 | Script | Feature | What it does |
 | --- | --- | --- |
 | [`render_mesh.py`](render_mesh.py) | Rasterization | Soft-rasterize a position-colored icosphere with `render_mesh_soft`. |
+| [`render_mesh_lit.py`](render_mesh_lit.py) | Lighting / shading | Hard z-buffer rasterizer + Blinn-Phong lights via `render_mesh`. |
 | [`raytrace_volume.py`](raytrace_volume.py) | Ray tracing | Cast camera rays through an analytic radiance field and composite with `volume_render`. |
 | [`extract_mesh.py`](extract_mesh.py) | Mesh extraction | Recover a mesh from an implicit SDF with `marching_cubes`, save OBJ, render it. |
 | [`fit_pointcloud.py`](fit_pointcloud.py) | Point-cloud optimization | Fit a noisy point cloud to a target shape with chamfer distance. |
 | [`fit_mesh.py`](fit_mesh.py) | Mesh fitting | Deform an icosphere onto a target with chamfer + mesh regularizers. |
 | [`fit_nerf.py`](fit_nerf.py) | NeRF | Train a compact NeRF on synthetic views, render a held-out view. |
 | [`fit_gaussians.py`](fit_gaussians.py) | Gaussian splatting | Fit 3D Gaussians to synthetic views with the real `GaussianTrainer`. |
+| [`refine_pose.py`](refine_pose.py) | Pose optimization | Recover a camera pose by optimizing an SE(3) twist via `refine_camera` (BARF-style). |
 | [`extend_renderer.py`](extend_renderer.py) | Extensibility | Plug a custom renderer into the pipeline via the `Renderer` protocol. |
 
 ## Real-scene training (bring your own dataset)
@@ -33,9 +35,13 @@ loaders in `mlx3d.datasets`.
 
 | Script | Feature | Data |
 | --- | --- | --- |
-| [`train_nerf.py`](train_nerf.py) | NeRF | A NeRF-synthetic scene, e.g. `nerf_synthetic/lego`. |
+| [`train_nerf.py`](train_nerf.py) | NeRF (vanilla MLP) | A NeRF-synthetic scene, e.g. `nerf_synthetic/lego`. |
+| [`train_ngp_nerf.py`](train_ngp_nerf.py) | NeRF (hash grid, fast) | A NeRF-synthetic scene; converges in minutes via `HashGridNeRF`. |
 | [`train_gaussian_splatting.py`](train_gaussian_splatting.py) | Gaussian splatting | A COLMAP scene (`sparse/0` + `images`) or a Blender scene. |
 | [`benchmark_gaussian_splatting.py`](benchmark_gaussian_splatting.py) | Profiling | A COLMAP scene; reports startup/train/render timings and memory. |
+
+A standalone, no-data micro-benchmark of all render paths is in
+[`benchmark.py`](benchmark.py) — see the [Benchmarks](../docs/benchmarks.md) page.
 
 ## Writing your own
 

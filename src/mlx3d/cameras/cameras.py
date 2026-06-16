@@ -18,7 +18,15 @@ from dataclasses import dataclass
 
 import mlx.core as mx
 
-__all__ = ["Camera", "look_at", "look_at_view_transform", "fov_to_focal", "focal_to_fov"]
+__all__ = [
+    "Camera",
+    "CameraBatch",
+    "look_at",
+    "look_at_view_transform",
+    "fov_to_focal",
+    "focal_to_fov",
+    "refine_camera",
+]
 
 
 def fov_to_focal(fov: float, pixels: int) -> float:
@@ -29,6 +37,58 @@ def fov_to_focal(fov: float, pixels: int) -> float:
 def focal_to_fov(focal: float, pixels: int) -> float:
     """Field of view in radians from a focal length in pixels."""
     return 2.0 * math.atan(pixels / (2.0 * focal))
+
+
+def _brown_distort(x: mx.array, y: mx.array, c: tuple[float, ...]) -> tuple[mx.array, mx.array]:
+    """Brown-Conrady (OpenCV) distortion of normalized coords. ``c`` = (k1, k2, p1, p2[, k3])."""
+    k1, k2, p1, p2 = c[0], c[1], c[2], c[3]
+    k3 = c[4] if len(c) > 4 else 0.0
+    r2 = x * x + y * y
+    radial = 1.0 + r2 * (k1 + r2 * (k2 + r2 * k3))
+    x_d = x * radial + 2.0 * p1 * x * y + p2 * (r2 + 2.0 * x * x)
+    y_d = y * radial + p1 * (r2 + 2.0 * y * y) + 2.0 * p2 * x * y
+    return x_d, y_d
+
+
+def _brown_undistort(xd: mx.array, yd: mx.array, c: tuple[float, ...], iters: int = 8):
+    """Invert Brown-Conrady distortion by fixed-point iteration."""
+    k1, k2, p1, p2 = c[0], c[1], c[2], c[3]
+    k3 = c[4] if len(c) > 4 else 0.0
+    x, y = xd, yd
+    for _ in range(iters):
+        r2 = x * x + y * y
+        radial = 1.0 + r2 * (k1 + r2 * (k2 + r2 * k3))
+        dx = 2.0 * p1 * x * y + p2 * (r2 + 2.0 * x * x)
+        dy = p1 * (r2 + 2.0 * y * y) + 2.0 * p2 * x * y
+        x = (xd - dx) / radial
+        y = (yd - dy) / radial
+    return x, y
+
+
+def _fisheye_distort(x: mx.array, y: mx.array, c: tuple[float, ...], eps: float = 1e-9):
+    """OpenCV equidistant fisheye distortion. ``c`` = (k1, k2, k3, k4)."""
+    k1, k2, k3, k4 = (list(c) + [0.0, 0.0, 0.0, 0.0])[:4]
+    r = mx.sqrt(x * x + y * y)
+    theta = mx.arctan(r)
+    th2 = theta * theta
+    theta_d = theta * (1.0 + th2 * (k1 + th2 * (k2 + th2 * (k3 + th2 * k4))))
+    scale = theta_d / mx.maximum(r, eps)
+    return x * scale, y * scale
+
+
+def _fisheye_undistort(
+    xd: mx.array, yd: mx.array, c: tuple[float, ...], iters: int = 8, eps: float = 1e-9
+):
+    """Invert fisheye distortion: solve for theta, then map back to a pinhole ray."""
+    k1, k2, k3, k4 = (list(c) + [0.0, 0.0, 0.0, 0.0])[:4]
+    theta_d = mx.sqrt(xd * xd + yd * yd)
+    theta = theta_d
+    for _ in range(iters):
+        th2 = theta * theta
+        theta = theta_d / (1.0 + th2 * (k1 + th2 * (k2 + th2 * (k3 + th2 * k4))))
+    r = mx.tan(theta)
+    scale = r / mx.maximum(theta_d, eps)
+    return xd * scale, yd * scale
 
 
 def look_at(eye: mx.array, at: mx.array, up: mx.array) -> tuple[mx.array, mx.array]:
@@ -87,6 +147,15 @@ class Camera:
         cx, cy: principal point in pixels.
         width, height: image size in pixels.
         znear, zfar: clipping range used by renderers.
+        orthographic: if ``True``, use an orthographic projection (parallel
+            rays, no perspective divide). ``fx``/``fy`` then act as
+            pixels-per-world-unit instead of focal lengths.
+        distortion: optional lens distortion coefficients. Brown-Conrady
+            ``(k1, k2, p1, p2[, k3])`` by default, or OpenCV fisheye
+            ``(k1, k2, k3, k4)`` when ``fisheye=True``. Applied in
+            :meth:`project_points` and inverted in :meth:`generate_rays` /
+            :meth:`unproject_points`.
+        fisheye: select the equidistant fisheye distortion model.
     """
 
     R: mx.array
@@ -99,6 +168,43 @@ class Camera:
     height: int
     znear: float = 0.01
     zfar: float = 100.0
+    orthographic: bool = False
+    distortion: tuple[float, ...] | None = None
+    fisheye: bool = False
+
+    @classmethod
+    def orthographic_camera(
+        cls,
+        scale: float,
+        width: int,
+        height: int,
+        R: mx.array | None = None,
+        t: mx.array | None = None,
+        **kwargs,
+    ) -> "Camera":
+        """Create an orthographic camera.
+
+        ``scale`` is the world-units half-height of the view volume: the visible
+        region spans ``[-scale, scale]`` vertically in camera space, mapped to
+        the image height (the width follows from the aspect ratio).
+        """
+        ppwu = (height / 2.0) / float(scale)  # pixels per world unit
+        if R is None:
+            R = mx.eye(3)
+        if t is None:
+            t = mx.zeros((3,))
+        return cls(
+            R=R,
+            t=t,
+            fx=ppwu,
+            fy=ppwu,
+            cx=width / 2.0,
+            cy=height / 2.0,
+            width=width,
+            height=height,
+            orthographic=True,
+            **kwargs,
+        )
 
     @classmethod
     def from_fov(
@@ -191,16 +297,43 @@ class Camera:
         """
         pc = self.world_to_camera(points)
         z = pc[..., 2]
+        if self.orthographic:
+            u = self.fx * pc[..., 0] + self.cx
+            v = self.fy * pc[..., 1] + self.cy
+            return mx.stack([u, v], axis=-1), z
         inv_z = 1.0 / mx.where(mx.abs(z) < eps, mx.full(z.shape, eps), z)
-        u = self.fx * pc[..., 0] * inv_z + self.cx
-        v = self.fy * pc[..., 1] * inv_z + self.cy
+        x, y = pc[..., 0] * inv_z, pc[..., 1] * inv_z
+        x, y = self._distort(x, y)
+        u = self.fx * x + self.cx
+        v = self.fy * y + self.cy
         return mx.stack([u, v], axis=-1), z
+
+    def _distort(self, x: mx.array, y: mx.array) -> tuple[mx.array, mx.array]:
+        """Apply lens distortion to normalized image coords (identity if none)."""
+        if self.distortion is None:
+            return x, y
+        if self.fisheye:
+            return _fisheye_distort(x, y, self.distortion)
+        return _brown_distort(x, y, self.distortion)
+
+    def _undistort(self, x: mx.array, y: mx.array) -> tuple[mx.array, mx.array]:
+        """Invert lens distortion on normalized image coords (identity if none)."""
+        if self.distortion is None:
+            return x, y
+        if self.fisheye:
+            return _fisheye_undistort(x, y, self.distortion)
+        return _brown_undistort(x, y, self.distortion)
 
     def unproject_points(self, xy: mx.array, depth: mx.array) -> mx.array:
         """Lift pixel coordinates ``(..., 2)`` with z-depths ``(...,)`` back to world points."""
-        x = (xy[..., 0] - self.cx) / self.fx * depth
-        y = (xy[..., 1] - self.cy) / self.fy * depth
-        return self.camera_to_world(mx.stack([x, y, depth], axis=-1))
+        if self.orthographic:
+            x = (xy[..., 0] - self.cx) / self.fx
+            y = (xy[..., 1] - self.cy) / self.fy
+            return self.camera_to_world(mx.stack([x, y, depth], axis=-1))
+        xd = (xy[..., 0] - self.cx) / self.fx
+        yd = (xy[..., 1] - self.cy) / self.fy
+        x, y = self._undistort(xd, yd)
+        return self.camera_to_world(mx.stack([x * depth, y * depth, depth], axis=-1))
 
     def generate_rays(self) -> tuple[mx.array, mx.array]:
         """Generate one ray per pixel (at pixel centers).
@@ -213,11 +346,154 @@ class Camera:
         v = mx.arange(self.height, dtype=mx.float32) + 0.5
         uu = mx.broadcast_to(u[None, :], (self.height, self.width))
         vv = mx.broadcast_to(v[:, None], (self.height, self.width))
-        dirs_cam = mx.stack(
-            [(uu - self.cx) / self.fx, (vv - self.cy) / self.fy, mx.ones_like(uu)],
-            axis=-1,
-        )
+        xc = (uu - self.cx) / self.fx
+        yc = (vv - self.cy) / self.fy
+        if self.orthographic:
+            # Parallel rays: shared forward direction, per-pixel origins on the
+            # image plane (z = 0 in camera space).
+            zeros = mx.zeros_like(uu)
+            origins = self.camera_to_world(mx.stack([xc, yc, zeros], axis=-1))
+            fwd = mx.array([0.0, 0.0, 1.0]) @ self.R
+            fwd = fwd / mx.linalg.norm(fwd)
+            dirs_world = mx.broadcast_to(fwd, origins.shape)
+            return origins, dirs_world
+        xc, yc = self._undistort(xc, yc)  # pixels carry distortion; rays must not
+        dirs_cam = mx.stack([xc, yc, mx.ones_like(uu)], axis=-1)
         dirs_world = dirs_cam @ self.R  # == dirs_cam @ R^-T == R^T applied per-vector
         dirs_world = dirs_world / mx.linalg.norm(dirs_world, axis=-1, keepdims=True)
         origins = mx.broadcast_to(self.camera_center, dirs_world.shape)
         return origins, dirs_world
+
+
+@dataclass
+class CameraBatch:
+    """A batch of ``N`` pinhole cameras with vectorized projection and rays.
+
+    Stores stacked extrinsics/intrinsics (``R`` ``(N, 3, 3)``, ``t`` ``(N, 3)``,
+    ``fx``/``fy``/``cx``/``cy`` ``(N,)``) sharing one image size. Indexing returns
+    a single :class:`Camera`, so it interoperates with the per-camera renderers;
+    the batched methods avoid Python loops for multi-view projection and ray
+    generation (e.g. projecting one point set into every view at once).
+    """
+
+    R: mx.array  # (N, 3, 3)
+    t: mx.array  # (N, 3)
+    fx: mx.array  # (N,)
+    fy: mx.array  # (N,)
+    cx: mx.array  # (N,)
+    cy: mx.array  # (N,)
+    width: int
+    height: int
+    znear: float = 0.01
+    zfar: float = 100.0
+
+    @classmethod
+    def from_cameras(cls, cameras: list[Camera]) -> "CameraBatch":
+        """Stack a list of single :class:`Camera` objects into a batch."""
+        if not cameras:
+            raise ValueError("from_cameras needs at least one camera.")
+        w, h = cameras[0].width, cameras[0].height
+        if any((c.width, c.height) != (w, h) for c in cameras):
+            raise ValueError("CameraBatch requires all cameras to share an image size.")
+        return cls(
+            R=mx.stack([mx.array(c.R) for c in cameras]),
+            t=mx.stack([mx.array(c.t) for c in cameras]),
+            fx=mx.array([float(c.fx) for c in cameras]),
+            fy=mx.array([float(c.fy) for c in cameras]),
+            cx=mx.array([float(c.cx) for c in cameras]),
+            cy=mx.array([float(c.cy) for c in cameras]),
+            width=w,
+            height=h,
+            znear=float(cameras[0].znear),
+            zfar=float(cameras[0].zfar),
+        )
+
+    def __len__(self) -> int:
+        return int(self.R.shape[0])
+
+    def __getitem__(self, i: int) -> Camera:
+        return Camera(
+            R=self.R[i],
+            t=self.t[i],
+            fx=float(self.fx[i]),
+            fy=float(self.fy[i]),
+            cx=float(self.cx[i]),
+            cy=float(self.cy[i]),
+            width=self.width,
+            height=self.height,
+            znear=self.znear,
+            zfar=self.zfar,
+        )
+
+    @property
+    def camera_centers(self) -> mx.array:
+        """``(N, 3)`` camera positions in world coordinates."""
+        return -(mx.swapaxes(self.R, -1, -2) @ self.t[..., None])[..., 0]
+
+    def world_to_camera(self, points: mx.array) -> mx.array:
+        """Transform world points ``(P, 3)`` into each camera frame -> ``(N, P, 3)``."""
+        return points[None] @ mx.swapaxes(self.R, -1, -2) + self.t[:, None, :]
+
+    def project_points(self, points: mx.array, eps: float = 1e-8) -> tuple[mx.array, mx.array]:
+        """Project world points ``(P, 3)`` into all ``N`` views.
+
+        Returns ``(xy, depth)`` of shapes ``(N, P, 2)`` and ``(N, P)``.
+        """
+        pc = self.world_to_camera(points)  # (N, P, 3)
+        z = pc[..., 2]
+        inv_z = 1.0 / mx.where(mx.abs(z) < eps, mx.full(z.shape, eps), z)
+        u = self.fx[:, None] * pc[..., 0] * inv_z + self.cx[:, None]
+        v = self.fy[:, None] * pc[..., 1] * inv_z + self.cy[:, None]
+        return mx.stack([u, v], axis=-1), z
+
+    def generate_rays(self) -> tuple[mx.array, mx.array]:
+        """Per-pixel rays for every camera.
+
+        Returns ``(origins, directions)`` both ``(N, height, width, 3)`` in world
+        coordinates, with normalized directions.
+        """
+        n, h, w = len(self), self.height, self.width
+        uu = mx.broadcast_to((mx.arange(w, dtype=mx.float32) + 0.5)[None, :], (h, w))
+        vv = mx.broadcast_to((mx.arange(h, dtype=mx.float32) + 0.5)[:, None], (h, w))
+        # Per-camera intrinsics -> direction in camera space, then to world.
+        xcam = (uu[None] - self.cx[:, None, None]) / self.fx[:, None, None]  # (N, H, W)
+        ycam = (vv[None] - self.cy[:, None, None]) / self.fy[:, None, None]
+        dirs_cam = mx.stack([xcam, ycam, mx.ones_like(xcam)], axis=-1)  # (N, H, W, 3)
+        dirs_world = dirs_cam.reshape(n, h * w, 3) @ self.R  # (N, HW, 3)
+        dirs_world = dirs_world / mx.linalg.norm(dirs_world, axis=-1, keepdims=True)
+        dirs_world = dirs_world.reshape(n, h, w, 3)
+        origins = mx.broadcast_to(self.camera_centers[:, None, None, :], dirs_world.shape)
+        return origins, dirs_world
+
+
+def refine_camera(camera: Camera, twist: mx.array) -> Camera:
+    """Return a copy of ``camera`` whose pose is perturbed by an SE(3) ``twist``.
+
+    The world-to-camera extrinsics are left-multiplied by ``exp(twist)`` (a 6D
+    Lie-algebra vector ``[v, omega]``), so at ``twist = 0`` the camera is
+    unchanged. The result is differentiable w.r.t. ``twist``, which makes camera
+    poses optimizable jointly with a scene (BARF / pose-free NeRF & 3DGS):
+    parameterize each view by a learnable twist, refine the camera, render, and
+    backpropagate.
+
+    Intrinsics, image size and distortion are carried over unchanged.
+    """
+    from ..transforms.se3 import Transform3d, se3_exp_map
+
+    delta = se3_exp_map(twist)
+    refined = Transform3d(camera.R, camera.t).compose(delta)
+    return Camera(
+        R=refined.rot,
+        t=refined.trans,
+        fx=camera.fx,
+        fy=camera.fy,
+        cx=camera.cx,
+        cy=camera.cy,
+        width=camera.width,
+        height=camera.height,
+        znear=camera.znear,
+        zfar=camera.zfar,
+        orthographic=camera.orthographic,
+        distortion=camera.distortion,
+        fisheye=camera.fisheye,
+    )

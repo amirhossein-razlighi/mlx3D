@@ -61,9 +61,7 @@ def load_blender(
         meta = json.load(f)
 
     cameras: list[Camera] = []
-    images = ImageCollection(
-        cache=cache, downscale=downscale, white_background=white_background
-    )
+    images = ImageCollection(cache=cache, downscale=downscale, white_background=white_background)
     for frame in meta["frames"]:
         img_path = os.path.join(root, frame["file_path"] + ".png")
         if not os.path.exists(img_path):
@@ -76,8 +74,18 @@ def load_blender(
             np.asarray(frame["transform_matrix"], dtype=np.float64)
         )
         cameras.append(
-            Camera(R=R, t=t, fx=focal, fy=focal, cx=W / 2.0, cy=H / 2.0,
-                   width=W, height=H, znear=0.01, zfar=100.0)
+            Camera(
+                R=R,
+                t=t,
+                fx=focal,
+                fy=focal,
+                cx=W / 2.0,
+                cy=H / 2.0,
+                width=W,
+                height=H,
+                znear=0.01,
+                zfar=100.0,
+            )
         )
 
     return BlenderDataset(cameras=cameras, images=images)

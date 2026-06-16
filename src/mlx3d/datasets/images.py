@@ -52,8 +52,9 @@ class ImageCollection:
     underlying storage mode.
     """
 
-    def __init__(self, cache: str = "ram", downscale: int = 1,
-                 white_background: bool | None = None):
+    def __init__(
+        self, cache: str = "ram", downscale: int = 1, white_background: bool | None = None
+    ):
         if cache not in ("ram", "uint8", "disk"):
             raise ValueError(f"cache must be 'ram', 'uint8' or 'disk', got {cache!r}.")
         self.cache = cache
