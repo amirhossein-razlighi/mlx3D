@@ -3,11 +3,33 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from mlx3d.io import load_obj, load_ply, save_obj, save_ply
+from mlx3d.io import load_gltf, load_obj, load_ply, save_gltf, save_obj, save_ply
+from mlx3d.utils import ico_sphere
 
 
 def assert_close(a, b, atol=1e-5):
     np.testing.assert_allclose(np.array(a), np.array(b), atol=atol)
+
+
+def test_gltf_glb_roundtrip(tmp_path):
+    mesh = ico_sphere(level=2, radius=1.0)
+    v, f, n = mesh.verts_packed(), mesh.faces_packed(), mesh.verts_normals_packed()
+    path = str(tmp_path / "sphere.glb")
+    save_gltf(path, v, f, normals=n)
+    g = load_gltf(path)
+    assert g.verts.shape == v.shape and g.faces.shape == f.shape
+    np.testing.assert_allclose(np.array(g.verts), np.array(v), atol=1e-6)
+    assert int(mx.abs(g.faces - f).max()) == 0
+    np.testing.assert_allclose(np.array(g.normals), np.array(n), atol=1e-6)
+
+
+def test_gltf_save_without_normals(tmp_path):
+    mesh = ico_sphere(level=1, radius=1.0)
+    path = str(tmp_path / "m.glb")
+    save_gltf(path, mesh.verts_packed(), mesh.faces_packed())
+    g = load_gltf(path)
+    assert g.normals is None
+    assert g.faces.shape == mesh.faces_packed().shape
 
 
 @pytest.fixture
