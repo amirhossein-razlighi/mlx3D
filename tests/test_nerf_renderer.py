@@ -3,6 +3,7 @@ import numpy as np
 
 from mlx3d.cameras import Camera
 from mlx3d.nn import (
+    FusedMLP,
     HashGridEncoding,
     HashGridNeRF,
     NeRF,
@@ -12,6 +13,34 @@ from mlx3d.nn import (
     render_rays_occupancy,
 )
 from mlx3d.renderer import render_points, sample_along_rays, sample_pdf, volume_render
+
+
+def test_fused_mlp_kernel_matches_mlx_reference():
+    mx.random.seed(0)
+    mlp = FusedMLP([24, 64, 64, 8])
+    x = mx.random.normal((5000, 24))
+    ref = mlp(x)
+    fused = mlp.forward_fused(x)
+    mx.eval(ref, fused)
+    assert ref.shape == (5000, 8)
+    np.testing.assert_allclose(np.array(fused), np.array(ref), atol=1e-4)
+
+
+def test_fused_mlp_is_trainable():
+    import mlx.nn as nn
+
+    mlp = FusedMLP([8, 32, 4])
+    x = mx.random.normal((64, 8))
+    target = mx.zeros((64, 4))
+
+    def loss(m):
+        return mx.mean((m(x) - target) ** 2)
+
+    _, grads = nn.value_and_grad(mlp, loss)(mlp)
+    mx.eval(grads)
+    import mlx.utils as mu
+
+    assert sum(float(mx.abs(v).sum()) for _, v in mu.tree_flatten(grads)) > 0
 
 
 def assert_close(a, b, atol=1e-5):
