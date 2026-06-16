@@ -3,11 +3,120 @@ import math
 import mlx.core as mx
 import numpy as np
 
-from mlx3d.cameras import Camera, look_at, look_at_view_transform
+from mlx3d.cameras import Camera, CameraBatch, look_at, look_at_view_transform
 
 
 def assert_close(a, b, atol=1e-5):
     np.testing.assert_allclose(np.array(a), np.array(b), atol=atol)
+
+
+def _ring_cameras(n=5, w=64, h=48):
+    return [
+        Camera.look_at(
+            eye=(2.0 * math.cos(a), 1.0, 2.0 * math.sin(a)),
+            at=(0, 0, 0),
+            fov=45.0,
+            width=w,
+            height=h,
+        )
+        for a in np.linspace(0.0, 2.0, n)
+    ]
+
+
+def test_camera_batch_projection_matches_per_camera():
+    cams = _ring_cameras()
+    batch = CameraBatch.from_cameras(cams)
+    assert len(batch) == len(cams)
+    pts = mx.random.normal((10, 3))
+    xy_b, z_b = batch.project_points(pts)
+    assert xy_b.shape == (len(cams), 10, 2)
+    for i, c in enumerate(cams):
+        xy_s, z_s = c.project_points(pts)
+        assert_close(xy_b[i], xy_s)
+        assert_close(z_b[i], z_s)
+
+
+def test_camera_batch_indexing_and_centers():
+    cams = _ring_cameras()
+    batch = CameraBatch.from_cameras(cams)
+    pts = mx.random.normal((5, 3))
+    # Indexing returns an equivalent single Camera.
+    xy_single, _ = batch[2].project_points(pts)
+    xy_batch, _ = batch.project_points(pts)
+    assert_close(xy_single, xy_batch[2])
+    for i, c in enumerate(cams):
+        assert_close(batch.camera_centers[i], c.camera_center)
+
+
+def test_camera_batch_rays_match_per_camera():
+    cams = _ring_cameras(n=3)
+    batch = CameraBatch.from_cameras(cams)
+    o_b, d_b = batch.generate_rays()
+    assert o_b.shape == (3, 48, 64, 3)
+    for i, c in enumerate(cams):
+        o_s, d_s = c.generate_rays()
+        assert_close(o_b[i], o_s)
+        assert_close(d_b[i], d_s)
+
+
+def test_camera_batch_requires_uniform_size():
+    cams = [
+        Camera.look_at(eye=(0, 0, -3.0), width=64, height=64),
+        Camera.look_at(eye=(0, 0, -3.0), width=32, height=64),
+    ]
+    try:
+        CameraBatch.from_cameras(cams)
+        raise AssertionError("expected ValueError for mismatched sizes")
+    except ValueError:
+        pass
+
+
+def _with_distortion(base, distortion, fisheye=False):
+    return Camera(
+        R=base.R,
+        t=base.t,
+        fx=base.fx,
+        fy=base.fy,
+        cx=base.cx,
+        cy=base.cy,
+        width=base.width,
+        height=base.height,
+        distortion=distortion,
+        fisheye=fisheye,
+    )
+
+
+def test_zero_distortion_equals_pinhole():
+    base = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), fov=50.0, width=128, height=128)
+    dcam = _with_distortion(base, (0.0, 0.0, 0.0, 0.0))
+    pts = mx.random.normal((20, 3)) * 0.5
+    xy0, _ = base.project_points(pts)
+    xy1, _ = dcam.project_points(pts)
+    assert_close(xy0, xy1, atol=1e-5)
+
+
+def test_brown_distortion_shifts_pixels_and_ray_roundtrip():
+    base = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), fov=60.0, width=128, height=128)
+    cam = _with_distortion(base, (-0.28, 0.10, 0.001, -0.0005))
+    pts = mx.random.normal((30, 3)) * 0.6
+    # Distortion changes where points land.
+    assert float(mx.abs(base.project_points(pts)[0] - cam.project_points(pts)[0]).max()) > 0.5
+    # Rays are undistorted: a point along a pixel's ray reprojects to that pixel.
+    o, d = cam.generate_rays()
+    i, j = 30, 90
+    pt = (o[i, j] + 2.5 * d[i, j])[None]
+    xy, _ = cam.project_points(pt)
+    assert_close(xy[0], mx.array([j + 0.5, i + 0.5]), atol=0.3)
+
+
+def test_fisheye_ray_project_consistency():
+    base = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), fov=70.0, width=96, height=96)
+    cam = _with_distortion(base, (0.1, -0.02, 0.003, 0.0), fisheye=True)
+    o, d = cam.generate_rays()
+    i, j = 20, 70
+    pt = (o[i, j] + 2.0 * d[i, j])[None]
+    xy, _ = cam.project_points(pt)
+    assert_close(xy[0], mx.array([j + 0.5, i + 0.5]), atol=0.3)
 
 
 def test_look_at_center_projects_to_principal_point():
@@ -62,3 +171,34 @@ def test_fov_focal():
     cam = Camera.from_fov(90.0, width=200, height=100)
     assert abs(cam.fy - 50.0) < 1e-4
     assert abs(math.degrees(cam.fov_y) - 90.0) < 1e-4
+
+
+def test_orthographic_projection_is_parallel():
+    R, t = look_at(mx.array([0.0, 0.0, -3.0]), mx.array([0.0, 0.0, 0.0]), mx.array([0.0, 1.0, 0.0]))
+    cam = Camera.orthographic_camera(scale=1.0, width=64, height=64, R=R, t=t)
+    assert cam.orthographic
+    # Points with the same camera-space xy project to the same pixel regardless of depth.
+    pts = mx.array([[0.3, 0.2, 0.0], [0.3, 0.2, 0.8], [0.3, 0.2, -0.5]])
+    xy, z = cam.project_points(pts)
+    assert_close(xy[0], xy[1], atol=1e-4)
+    assert_close(xy[0], xy[2], atol=1e-4)
+    # The principal point images the camera-space origin to the image center.
+    xy0, _ = cam.project_points(mx.array([[0.0, 0.0, 1.0]]))
+    assert_close(xy0[0], mx.array([32.0, 32.0]), atol=1e-4)
+
+
+def test_orthographic_rays_are_parallel_with_varying_origins():
+    R, t = look_at(mx.array([0.0, 0.0, -3.0]), mx.array([0.0, 0.0, 0.0]), mx.array([0.0, 1.0, 0.0]))
+    cam = Camera.orthographic_camera(scale=1.0, width=32, height=32, R=R, t=t)
+    o, d = cam.generate_rays()
+    assert_close(d[0, 0], d[31, 31], atol=1e-5)  # parallel
+    assert float(mx.abs(o[0, 0] - o[31, 31]).max()) > 0.1  # but origins differ
+
+
+def test_orthographic_unproject_roundtrip():
+    R, t = look_at(mx.array([0.0, 0.0, -3.0]), mx.array([0.0, 0.0, 0.0]), mx.array([0.0, 1.0, 0.0]))
+    cam = Camera.orthographic_camera(scale=1.5, width=48, height=48, R=R, t=t)
+    pts = mx.array([[0.4, -0.3, 0.2]])
+    xy, z = cam.project_points(pts)
+    back = cam.unproject_points(xy[0], z[0])
+    assert_close(back, pts[0], atol=1e-4)

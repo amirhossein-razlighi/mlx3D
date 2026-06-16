@@ -2,12 +2,64 @@ import mlx.core as mx
 import numpy as np
 
 from mlx3d.cameras import Camera
-from mlx3d.nn import HashGridEncoding, NeRF, PositionalEncoding, render_rays
+from mlx3d.nn import (
+    HashGridEncoding,
+    HashGridNeRF,
+    NeRF,
+    OccupancyGrid,
+    PositionalEncoding,
+    render_rays,
+)
 from mlx3d.renderer import render_points, sample_along_rays, sample_pdf, volume_render
 
 
 def assert_close(a, b, atol=1e-5):
     np.testing.assert_allclose(np.array(a), np.array(b), atol=atol)
+
+
+def test_occupancy_grid_matches_analytic_sphere():
+    def density(p):
+        r = mx.linalg.norm(p, axis=-1)
+        return mx.where(r < 0.6, 10.0, 0.0)
+
+    grid = OccupancyGrid(resolution=64, bounds=(-1.5, 1.5))
+    grid.update(density, threshold=1.0)
+    # Occupied fraction ~ sphere volume / box volume.
+    expected = (4.0 / 3.0 * np.pi * 0.6**3) / (3.0**3)
+    assert abs(grid.occupied_fraction - expected) < 0.005
+    # Point queries: inside occupied, outside/empty not.
+    q = grid.query(mx.array([[0.0, 0, 0], [1.4, 1.4, 1.4], [0.5, 0, 0], [0.65, 0, 0]]))
+    assert [bool(x) for x in q] == [True, False, True, False]
+    # Out-of-bounds is empty.
+    assert not bool(grid.query(mx.array([[5.0, 5, 5]]))[0])
+
+
+def test_hashgrid_nerf_forward_and_render_rays():
+    model = HashGridNeRF(bounds=(-1.0, 1.0), num_levels=4, log2_hashmap_size=14)
+    pts = mx.random.uniform(low=-1, high=1, shape=(32, 8, 3))
+    dirs = mx.broadcast_to(mx.array([0.0, 0.0, 1.0]), pts.shape)
+    density, rgb = model(pts, dirs)
+    assert density.shape == (32, 8)
+    assert rgb.shape == (32, 8, 3)
+    assert bool((rgb >= 0).all() and (rgb <= 1).all())  # sigmoid output
+    # Drops into render_rays unchanged.
+    o = mx.random.normal((16, 3))
+    d = mx.array([[0.0, 0.0, 1.0]] * 16)
+    out = render_rays(model, o, d, 2.0, 6.0, num_coarse=16)
+    assert out["rgb"].shape == (16, 3)
+
+
+def test_hashgrid_nerf_density_zero_outside_bounds():
+    # Density must vanish outside the scene AABB (the fix that lets the hash
+    # grid localize geometry instead of collapsing to the background).
+    model = HashGridNeRF(bounds=(-1.0, 1.0))
+    inside = mx.zeros((4, 3))  # origin, inside
+    outside = mx.full((4, 3), 5.0)  # far outside the cube
+    pts = mx.concatenate([inside, outside])[:, None, :]
+    dirs = mx.broadcast_to(mx.array([0.0, 0.0, 1.0]), pts.shape)
+    density, _ = model(pts, dirs)
+    assert float(mx.abs(density[4:]).max()) == 0.0  # outside -> exactly zero
+    assert float(density[:4].max()) > 0.0  # inside -> nonzero (trunc-exp)
 
 
 def test_positional_encoding_shapes_and_values():

@@ -2,7 +2,15 @@
 
 **Differentiable 3D computer vision on Apple Silicon, built on [MLX](https://github.com/ml-explore/mlx).**
 
-MLX3D brings the PyTorch3D workflow to Macs: batched 3D data structures, cameras, differentiable rendering, and modern view-synthesis methods (NeRF and 3D Gaussian Splatting) — all running natively on the Apple GPU through MLX, with the Gaussian Splatting rasterizer implemented as custom Metal kernels.
+MLX3D brings the PyTorch3D workflow to Macs: batched 3D data structures, cameras, differentiable rendering, and modern view-synthesis methods (NeRF and 3D Gaussian Splatting) — all running natively on the Apple GPU through MLX, with the Gaussian Splatting and mesh rasterizers implemented as custom Metal kernels.
+
+<p align="center">
+  <img src="assets/render_lit_sphere.png" width="24%" />
+  <img src="assets/gallery_nerf.png" width="24%" />
+  <img src="assets/gallery_gsplat.png" width="24%" />
+  <img src="assets/render_lit_torus.png" width="24%" />
+</p>
+<p align="center"><em>All rendered on the Apple GPU: a Phong-lit mesh; a hash-grid NeRF on the Lego scene (27 dB); 3D Gaussian Splatting on the Tanks-and-Temples truck scene; two-sided mesh shading.</em></p>
 
 ## Highlights
 
