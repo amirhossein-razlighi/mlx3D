@@ -701,6 +701,43 @@ def test_trainer_2dgs_keeps_surfel_thickness_after_densify():
     assert trainer.grad_accum.shape == (model.num_gaussians,)
 
 
+def test_trainer_2dgs_geometry_loss_is_opt_in_and_reported():
+    mx.random.seed(15)
+    cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), width=20, height=20)
+    target = mx.random.uniform(shape=(20, 20, 3))
+    model = GaussianModel.from_points(mx.random.normal((24, 3)) * 0.35, sh_degree=0)
+    params = {k: mx.array(v) for k, v in model.params.items()}
+    probe = mx.zeros((model.num_gaussians, 2))
+    bg = mx.zeros((3,))
+
+    base = GaussianTrainer(model.copy(), TrainerConfig(method="2dgs", densify_from=10_000))
+    weighted = GaussianTrainer(
+        model.copy(),
+        TrainerConfig(
+            method="2dgs",
+            densify_from=10_000,
+            lambda_2d_depth_variance=0.1,
+            lambda_2d_normal_consistency=0.05,
+            geometry_min_alpha=0.001,
+        ),
+    )
+
+    base_loss, (_, _, base_metrics) = base._render_loss(params, probe, cam, target, bg)
+    weighted_loss, (_, _, weighted_metrics) = weighted._render_loss(params, probe, cam, target, bg)
+
+    assert float(weighted_loss) >= float(base_loss)
+    assert float(base_metrics["depth_variance"]) == 0.0
+    assert float(base_metrics["normal_consistency"]) == 0.0
+    assert float(weighted_metrics["depth_variance"]) >= 0.0
+    assert float(weighted_metrics["normal_consistency"]) >= 0.0
+
+    info = weighted.step(cam, target)
+    assert np.isfinite(info["loss"])
+    assert set(info["geometry"]) == {"depth_variance", "normal_consistency"}
+    assert info["geometry"]["depth_variance"] >= 0.0
+    assert info["geometry"]["normal_consistency"] >= 0.0
+
+
 def test_trainer_max_gaussians_cap():
     mx.random.seed(5)
     cam = Camera.look_at(eye=(0.0, 0.0, -3.0), at=(0, 0, 0), width=32, height=32)

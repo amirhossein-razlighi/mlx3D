@@ -162,6 +162,13 @@ axis to a thin disk, controlled by `--2d-thickness` as a fraction of scene
 extent. The output remains a standard 3DGS PLY, so checkpoints still open in
 the built-in viewer and other splat viewers.
 
+2DGS geometry regularization is opt-in. `--2d-depth-variance` penalizes
+per-pixel depth variance along a ray, and `--2d-normal-consistency` aligns
+rendered surfel normals with normals derived from the expected depth map.
+Both terms reuse the differentiable feature rasterizer, so they keep gradients
+on the Metal-backed splatting path. `--geometry-min-alpha` controls which
+pixels are included in those auxiliary losses.
+
 Periodic saves render a deterministic held training view and report PSNR.
 Set `--eval-views N` to average that save-time PSNR over `N` evenly spaced
 training views while still saving the first rendered image. The default is one
@@ -181,9 +188,9 @@ NeRF-synthetic scenes and `--antialias` to score the anti-aliased render path.
 !!! note "Method variants"
     The default trainer remains vanilla 3DGS. MCMC-style fixed-budget
     relocation is available with `--method mcmc`; surfel-style 2DGS is
-    available with `--method 2dgs`. Full 2DGS geometry losses and surface
-    extraction refinements remain experimental work rather than hidden changes
-    to the default path.
+    available with `--method 2dgs`. The 2DGS depth-variance and normal-depth
+    consistency losses are explicit opt-ins rather than hidden changes to the
+    default path; surface extraction refinements remain experimental.
 
 ## Low-memory training (8-16 GB Macs)
 
