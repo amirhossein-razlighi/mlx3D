@@ -12,6 +12,7 @@ from mlx3d.splatting import (
     num_sh_bases,
     project_gaussians,
     render_gaussian_depth,
+    render_gaussian_features,
     render_gaussians,
     render_gaussians_reference,
     rgb_to_sh,
@@ -177,6 +178,112 @@ def test_depth_rasterization_outputs_valid_depth(random_scene):
     depth = np.array(out["depth"])
     assert np.isfinite(depth[valid]).all()
     assert depth[valid].min() > 0.0
+
+
+def test_feature_rasterization_matches_reference_with_padding(random_scene):
+    cam, means, quats, scales, opac, _ = random_scene
+    features = mx.concatenate(
+        [
+            means,
+            mx.arange(means.shape[0] * 2, dtype=mx.float32).reshape(means.shape[0], 2)
+            / means.shape[0],
+        ],
+        axis=1,
+    )
+    bg = mx.linspace(-0.2, 0.2, features.shape[1])
+
+    out_k = render_gaussian_features(
+        cam, means, quats, scales, opac, features, background=bg
+    )
+    out_r = render_gaussians_reference(
+        cam, means, quats, scales, opac, features, background=bg
+    )
+
+    assert out_k["features"].shape == (cam.height, cam.width, 5)
+    assert_close(out_k["features"], out_r["image"], atol=1e-3)
+    assert_close(out_k["alpha"], out_r["alpha"], atol=1e-3)
+
+
+def test_feature_rasterization_normalized_depth_matches_depth_kernel(random_scene):
+    cam, means, quats, scales, opac, _ = random_scene
+    depth = render_gaussian_depth(cam, means, quats, scales, opac)
+    feat = render_gaussian_features(
+        cam,
+        means,
+        quats,
+        scales,
+        opac,
+        depth["depths"][:, None],
+        background=mx.array([10.0]),
+        normalize=True,
+    )
+
+    valid = np.array(depth["alpha"]) > 1e-3
+    assert feat["features"].shape == (cam.height, cam.width, 1)
+    assert_close(feat["alpha"], depth["alpha"], atol=1e-5)
+    np.testing.assert_allclose(
+        np.array(feat["features"][..., 0])[valid],
+        np.array(depth["depth"])[valid],
+        atol=1e-4,
+    )
+    # Normalized outputs ignore background and stay zero where no splats hit.
+    empty = ~valid
+    if empty.any():
+        assert np.abs(np.array(feat["features"][..., 0])[empty]).max() < 1e-6
+
+
+def test_feature_rasterization_gradients_match_reference():
+    mx.random.seed(16)
+    n = 40
+    cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), width=32, height=24, fov=55.0)
+    means = mx.random.normal((n, 3)) * 0.35
+    quats = mx.random.normal((n, 4))
+    scales = mx.exp(mx.random.normal((n, 3)) * 0.2 - 2.4)
+    opac = mx.sigmoid(mx.random.normal((n,)))
+    features = mx.random.normal((n, 5)) * 0.25
+    target = mx.random.normal((cam.height, cam.width, 5)) * 0.1
+    bg = mx.linspace(0.0, 0.4, 5)
+
+    def kernel_loss(means, quats, scales, opac, features):
+        out = render_gaussian_features(
+            cam, means, quats, scales, opac, features, background=bg
+        )
+        return ((out["features"] - target) ** 2).mean() + 0.03 * out["alpha"].mean()
+
+    def ref_loss(means, quats, scales, opac, features):
+        out = render_gaussians_reference(
+            cam, means, quats, scales, opac, features, background=bg
+        )
+        return ((out["image"] - target) ** 2).mean() + 0.03 * out["alpha"].mean()
+
+    gk = mx.grad(kernel_loss, argnums=(0, 1, 2, 3, 4))(means, quats, scales, opac, features)
+    gr = mx.grad(ref_loss, argnums=(0, 1, 2, 3, 4))(means, quats, scales, opac, features)
+    for name, a, b in zip(["means", "quats", "scales", "opac", "features"], gk, gr):
+        a, b = np.array(a), np.array(b)
+        scale = np.abs(b).max() + 1e-12
+        assert np.abs(a - b).max() / scale < 2e-3, f"gradient mismatch for {name}"
+
+
+def test_model_render_features_and_input_validation():
+    mx.random.seed(17)
+    model = GaussianModel.from_points(mx.random.normal((10, 3)) * 0.2, sh_degree=0)
+    cam = Camera.look_at(eye=(0, 0, -2.5), at=(0, 0, 0), width=24, height=16)
+    features = mx.random.normal((model.num_gaussians, 1))
+    out = model.render_features(cam, features, background=0.25)
+    assert out["features"].shape == (16, 24, 1)
+    assert not bool(mx.isnan(out["features"]).any())
+
+    with pytest.raises(ValueError, match="features must have shape"):
+        render_gaussian_features(
+            cam,
+            model.params["means"],
+            model.params["quats"],
+            model.scales_act,
+            model.opacities_act,
+            features[:, 0],
+        )
+    with pytest.raises(ValueError, match="same first dimension"):
+        model.render_features(cam, features[:-1])
 
 
 def test_kernel_matches_reference_gradients(random_scene):

@@ -5,7 +5,7 @@ import numpy as np
 
 from ..cameras import Camera
 from ..io import load_ply, save_ply
-from .render import render_gaussian_depth, render_gaussians
+from .render import render_gaussian_depth, render_gaussian_features, render_gaussians
 from .sh import num_sh_bases, rgb_to_sh
 
 __all__ = ["GaussianModel"]
@@ -160,6 +160,25 @@ class GaussianModel:
             self.params["quats"],
             self.scales_act,
             self.opacities_act,
+        )
+
+    def render_features(
+        self,
+        camera: Camera,
+        features: mx.array,
+        background: mx.array | None = None,
+        normalize: bool = False,
+    ) -> dict:
+        """Render arbitrary per-Gaussian feature channels from this model."""
+        return render_gaussian_features(
+            camera,
+            self.params["means"],
+            self.params["quats"],
+            self.scales_act,
+            self.opacities_act,
+            features,
+            background=background,
+            normalize=normalize,
         )
 
     def one_up_sh_degree(self) -> None:
