@@ -274,6 +274,14 @@ compact = model.compact(
 compact.save_ply("point_cloud_compact.ply")
 ```
 
+Or run the packaged CLI:
+
+```bash
+mlx3d-compact outputs/gs/point_cloud.ply \
+    --out outputs/gs/point_cloud_compact.ply \
+    --min-opacity 0.01 --max-gaussians 500000 --sh-degree 2
+```
+
 Compaction ranks Gaussians by a view-independent footprint proxy,
 `opacity * max_scale^2`, preserves retained row order, and can lower the
 spherical-harmonic degree when view-dependent color detail is less important

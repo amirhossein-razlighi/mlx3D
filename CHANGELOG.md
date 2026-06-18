@@ -19,6 +19,7 @@ Release branch in progress.
   SSIM, L1, per-view metrics, and JSON output.
 - Gaussian checkpoint compaction by opacity/footprint importance, Gaussian
   count cap, and optional spherical-harmonic degree truncation.
+- `mlx3d-compact` CLI for checkpoint pruning and SH-degree truncation.
 - PBR-style Cook-Torrance/GGX mesh shading with roughness and metallic controls.
 - Morton-order face sorting for ray-mesh intersection, improving chunk-level
   AABB culling on arbitrarily ordered meshes while preserving original face IDs.
