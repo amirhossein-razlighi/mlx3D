@@ -50,7 +50,9 @@ def _morton_codes(points: np.ndarray) -> np.ndarray:
     hi = points.max(axis=0)
     denom = np.maximum(hi - lo, 1e-12)
     q = np.clip((points - lo) / denom * 1023.0, 0.0, 1023.0).astype(np.uint32)
-    return _expand_bits_10(q[:, 0]) | (_expand_bits_10(q[:, 1]) << 1) | (_expand_bits_10(q[:, 2]) << 2)
+    return (
+        _expand_bits_10(q[:, 0]) | (_expand_bits_10(q[:, 1]) << 1) | (_expand_bits_10(q[:, 2]) << 2)
+    )
 
 
 def spatially_sort_faces(meshes: Meshes) -> tuple[Meshes, mx.array]:
@@ -77,9 +79,7 @@ def spatially_sort_faces(meshes: Meshes) -> tuple[Meshes, mx.array]:
         inverse_parts.append(mx.array(order + face_offset, dtype=mx.int32))
         face_offset += faces.shape[0]
     inverse = (
-        mx.concatenate(inverse_parts, axis=0)
-        if inverse_parts
-        else mx.zeros((0,), dtype=mx.int32)
+        mx.concatenate(inverse_parts, axis=0) if inverse_parts else mx.zeros((0,), dtype=mx.int32)
     )
     return Meshes(verts_list, sorted_faces), inverse
 

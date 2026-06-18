@@ -198,9 +198,8 @@ class GaussianTrainer:
         cfg = self.config
         zero = mx.array(0.0, dtype=mx.float32)
         metrics = {"depth_variance": zero, "normal_consistency": zero}
-        if (
-            cfg.method != "2dgs"
-            or (cfg.lambda_2d_depth_variance <= 0 and cfg.lambda_2d_normal_consistency <= 0)
+        if cfg.method != "2dgs" or (
+            cfg.lambda_2d_depth_variance <= 0 and cfg.lambda_2d_normal_consistency <= 0
         ):
             return zero, metrics
 
@@ -251,9 +250,7 @@ class GaussianTrainer:
             rendered_normals = rendered_normals / mx.maximum(
                 mx.linalg.norm(rendered_normals, axis=-1, keepdims=True), 1e-8
             )
-            valid4 = (
-                valid[:-1, :-1] * valid[:-1, 1:] * valid[1:, :-1] * valid[1:, 1:]
-            )
+            valid4 = valid[:-1, :-1] * valid[:-1, 1:] * valid[1:, :-1] * valid[1:, 1:]
             denom4 = mx.maximum(valid4.sum(), 1.0)
             cos = mx.sum(rendered_normals * depth_normals, axis=-1)
             metrics["normal_consistency"] = ((1.0 - mx.abs(cos)) * valid4).sum() / denom4

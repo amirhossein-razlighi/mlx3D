@@ -301,12 +301,8 @@ def test_feature_rasterization_matches_reference_with_padding(random_scene):
     )
     bg = mx.linspace(-0.2, 0.2, features.shape[1])
 
-    out_k = render_gaussian_features(
-        cam, means, quats, scales, opac, features, background=bg
-    )
-    out_r = render_gaussians_reference(
-        cam, means, quats, scales, opac, features, background=bg
-    )
+    out_k = render_gaussian_features(cam, means, quats, scales, opac, features, background=bg)
+    out_r = render_gaussians_reference(cam, means, quats, scales, opac, features, background=bg)
 
     assert out_k["features"].shape == (cam.height, cam.width, 5)
     assert_close(out_k["features"], out_r["image"], atol=1e-3)
@@ -354,15 +350,11 @@ def test_feature_rasterization_gradients_match_reference():
     bg = mx.linspace(0.0, 0.4, 5)
 
     def kernel_loss(means, quats, scales, opac, features):
-        out = render_gaussian_features(
-            cam, means, quats, scales, opac, features, background=bg
-        )
+        out = render_gaussian_features(cam, means, quats, scales, opac, features, background=bg)
         return ((out["features"] - target) ** 2).mean() + 0.03 * out["alpha"].mean()
 
     def ref_loss(means, quats, scales, opac, features):
-        out = render_gaussians_reference(
-            cam, means, quats, scales, opac, features, background=bg
-        )
+        out = render_gaussians_reference(cam, means, quats, scales, opac, features, background=bg)
         return ((out["image"] - target) ** 2).mean() + 0.03 * out["alpha"].mean()
 
     gk = mx.grad(kernel_loss, argnums=(0, 1, 2, 3, 4))(means, quats, scales, opac, features)
