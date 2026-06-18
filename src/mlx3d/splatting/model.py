@@ -5,6 +5,8 @@ import numpy as np
 
 from ..cameras import Camera
 from ..io import load_ply, save_ply
+from ..structures import Meshes
+from ..transforms import quaternion_to_matrix
 from .render import render_gaussian_depth, render_gaussian_features, render_gaussians
 from .sh import num_sh_bases, rgb_to_sh
 
@@ -193,6 +195,69 @@ class GaussianModel:
     def one_up_sh_degree(self) -> None:
         if self.active_sh_degree < self.sh_degree:
             self.active_sh_degree += 1
+
+    # --------------------------------------------------------- surface export
+    def surfel_points(
+        self,
+        min_opacity: float = 0.01,
+        max_points: int | None = None,
+        orient_towards: tuple[float, float, float] | mx.array | None = None,
+    ) -> tuple[mx.array, mx.array]:
+        """Return oriented surfel samples from the Gaussian centers.
+
+        This is intended for 2DGS-style checkpoints, where the local ``z`` axis
+        is the surfel normal and the first two local scales span the disk. Rows
+        are filtered by activated opacity and, when capped, ranked by
+        ``opacity * scale_x * scale_y`` so large opaque surfels survive first.
+        """
+        if max_points is not None and max_points <= 0:
+            raise ValueError("max_points must be positive when provided.")
+        n = self.num_gaussians
+        if n == 0:
+            empty = mx.zeros((0, 3), dtype=mx.float32)
+            return empty, empty
+
+        opacity = np.array(self.opacities_act)
+        scales = np.array(self.scales_act)
+        importance = opacity * scales[:, 0] * scales[:, 1]
+        keep = opacity >= float(min_opacity)
+        if not keep.any():
+            keep[int(np.argmax(importance))] = True
+        keep_idx = np.where(keep)[0]
+        if max_points is not None and keep_idx.size > max_points:
+            local = np.argpartition(-importance[keep_idx], max_points - 1)[:max_points]
+            keep_idx = keep_idx[local]
+        keep_idx = np.sort(keep_idx.astype(np.int32))
+        idx = mx.array(keep_idx)
+
+        points = self.params["means"][idx]
+        normals = quaternion_to_matrix(self.params["quats"][idx])[:, :, 2]
+        normals = normals / mx.maximum(mx.linalg.norm(normals, axis=-1, keepdims=True), 1e-8)
+        if orient_towards is not None:
+            target = mx.array(orient_towards, dtype=points.dtype)
+            flip = mx.sum((target - points) * normals, axis=-1, keepdims=True) < 0
+            normals = mx.where(flip, -normals, normals)
+        return points, normals
+
+    def extract_surface_mesh(
+        self,
+        resolution: int = 64,
+        padding: float = 0.1,
+        min_opacity: float = 0.01,
+        max_points: int | None = 200_000,
+        orient_towards: tuple[float, float, float] | mx.array | None = None,
+    ) -> Meshes:
+        """Reconstruct a mesh from oriented Gaussian surfels via Poisson reconstruction."""
+        if resolution <= 1:
+            raise ValueError("resolution must be greater than 1.")
+        points, normals = self.surfel_points(
+            min_opacity=min_opacity,
+            max_points=max_points,
+            orient_towards=orient_towards,
+        )
+        from ..ops import poisson_reconstruction
+
+        return poisson_reconstruction(points, normals, resolution=resolution, padding=padding)
 
     # -------------------------------------------------------------- compaction
     def copy(self) -> "GaussianModel":

@@ -28,6 +28,8 @@ Release branch in progress.
 - `mlx3d-compact` CLI for checkpoint pruning and SH-degree truncation.
 - Opt-in 2DGS depth-variance and normal-depth consistency regularizers that
   reuse the differentiable Metal-backed feature rasterizer.
+- 2DGS surfel extraction helpers on `GaussianModel`, including a Poisson
+  reconstruction wrapper for mesh extraction from oriented Gaussian disks.
 - PBR-style Cook-Torrance/GGX mesh shading with roughness and metallic controls.
 - Morton-order face sorting for ray-mesh intersection, improving chunk-level
   AABB culling on arbitrarily ordered meshes while preserving original face IDs.
