@@ -32,6 +32,37 @@ def test_render_cli_autodetects_gaussian_ply(tmp_path):
     assert float(img.max()) > 0.05
 
 
+def test_render_cli_renders_gaussian_with_ut_projection(tmp_path):
+    model = GaussianModel.from_points(
+        mx.array([[0.0, 0.0, 0.0], [0.2, 0.1, 0.0]]),
+        mx.array([[1.0, 0.2, 0.1], [0.1, 0.7, 1.0]]),
+        sh_degree=0,
+        initial_opacity=0.95,
+    )
+    model.params["scales"] = mx.log(mx.full((2, 3), 0.15))
+    ckpt = tmp_path / "ut_point_cloud.ply"
+    out = tmp_path / "ut_render.png"
+    model.save_ply(str(ckpt))
+
+    main(
+        [
+            str(ckpt),
+            "--out",
+            str(out),
+            "--width",
+            "40",
+            "--height",
+            "32",
+            "--projection",
+            "ut",
+        ]
+    )
+
+    img = load_image(str(out))
+    assert img.shape == (32, 40, 3)
+    assert float(img.max()) > 0.05
+
+
 def test_render_cli_renders_gltf_mesh_depth(tmp_path):
     verts = mx.array([[-1.0, -1.0, 0.0], [1.0, -1.0, 0.0], [0.0, 1.0, 0.0]])
     faces = mx.array([[0, 1, 2]], dtype=mx.int32)
