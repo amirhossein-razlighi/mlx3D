@@ -9,6 +9,7 @@ from mlx3d.renderer import (
     DirectionalLights,
     PointLights,
     interpolate_face_attributes,
+    pbr_shading,
     rasterize_meshes,
     render_mesh,
 )
@@ -184,3 +185,66 @@ def test_shading_none_returns_albedo():
     lit = img[alpha > 0.5]
     # Unlit albedo: covered pixels carry the flat color, no lighting modulation.
     np.testing.assert_allclose(lit.mean(axis=0), [0.2, 0.5, 0.9], atol=0.05)
+
+
+def test_pbr_shading_material_controls_are_stable():
+    points = mx.zeros((1, 1, 3))
+    normals = mx.array([[[0.0, 0.0, -1.0]]])
+    albedo = mx.array([[[0.8, 0.2, 0.1]]])
+    camera_center = mx.array([0.0, 0.0, -3.0])
+    lights = [DirectionalLights(direction=(0.0, 0.0, 1.0), color=(1.0, 1.0, 1.0))]
+
+    smooth = pbr_shading(points, normals, albedo, camera_center, lights, roughness=0.12)
+    rough = pbr_shading(points, normals, albedo, camera_center, lights, roughness=0.9)
+    ambient_dielectric = pbr_shading(
+        points,
+        normals,
+        albedo,
+        camera_center,
+        [AmbientLights(color=(1.0, 1.0, 1.0))],
+        metallic=0.0,
+    )
+    ambient_metal = pbr_shading(
+        points,
+        normals,
+        albedo,
+        camera_center,
+        [AmbientLights(color=(1.0, 1.0, 1.0))],
+        metallic=1.0,
+    )
+
+    assert not bool(mx.isnan(smooth).any())
+    assert float(smooth.mean()) > float(rough.mean())
+    assert float(ambient_dielectric.mean()) > 0.1
+    assert float(ambient_metal.mean()) < 1e-6
+
+
+def test_render_mesh_pbr_path_outputs_finite_image():
+    mesh = ico_sphere(level=2, radius=1.0)
+    cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), fov=60.0, width=40, height=40)
+    out = render_mesh(
+        cam,
+        mesh,
+        verts_colors=mx.full((mesh.verts_packed().shape[0], 3), mx.array([0.7, 0.2, 0.1])),
+        lights=[
+            DirectionalLights(direction=(0.0, 0.0, 1.0), color=(1.0, 1.0, 1.0)),
+            AmbientLights(color=(0.05, 0.05, 0.05)),
+        ],
+        shading="pbr",
+        roughness=0.35,
+        metallic=0.2,
+    )
+
+    assert out["image"].shape == (40, 40, 3)
+    assert not bool(mx.isnan(out["image"]).any())
+    assert float(out["image"].max()) > 0.05
+
+
+def test_render_mesh_rejects_unknown_shading_mode():
+    mesh = ico_sphere(level=1, radius=1.0)
+    cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), fov=60.0, width=16, height=16)
+    try:
+        render_mesh(cam, mesh, shading="toon")
+        raise AssertionError("expected ValueError for unknown shading")
+    except ValueError as e:
+        assert "shading" in str(e)
