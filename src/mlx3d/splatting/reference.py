@@ -21,13 +21,14 @@ def render_gaussians_reference(
     opacities: mx.array,
     colors: mx.array,
     background: mx.array | None = None,
+    antialias: bool = False,
 ) -> dict[str, mx.array]:
     """Reference renderer matching :func:`mlx3d.splatting.render_gaussians`."""
     if background is None:
         background = mx.zeros((3,))
     H, W = camera.height, camera.width
 
-    proj = project_gaussians(camera, means, quats, scales)
+    proj = project_gaussians(camera, means, quats, scales, antialias=antialias)
     means2d, conics, depths, radii = (
         proj["means2d"],
         proj["conics"],
@@ -40,7 +41,7 @@ def render_gaussians_reference(
     means2d = means2d[order]
     conics = conics[order]
     colors = colors[order]
-    opac = opacities[order]
+    opac = (opacities * proj["compensation"])[order]
     radii = radii[order]
 
     xs = mx.arange(W, dtype=mx.float32) + 0.5

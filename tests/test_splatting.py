@@ -11,12 +11,15 @@ from mlx3d.splatting import (
     eval_sh,
     num_sh_bases,
     project_gaussians,
+    project_gaussians_ut,
     render_gaussian_depth,
+    render_gaussian_features,
     render_gaussians,
     render_gaussians_reference,
     rgb_to_sh,
     sh_to_rgb,
 )
+from mlx3d.structures import Meshes
 from mlx3d.transforms import quaternion_to_matrix
 
 
@@ -67,6 +70,45 @@ def test_projection_culls_behind_camera():
         cam, mx.array([[0.0, 0.0, -10.0]]), mx.array([[1.0, 0, 0, 0]]), mx.full((1, 3), 0.1)
     )
     assert float(proj["radii"][0]) == 0.0
+
+
+def test_ut_projection_respects_camera_distortion():
+    base = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), fov=60.0, width=128, height=128)
+    cam = Camera(
+        R=base.R,
+        t=base.t,
+        fx=base.fx,
+        fy=base.fy,
+        cx=base.cx,
+        cy=base.cy,
+        width=base.width,
+        height=base.height,
+        distortion=(-0.35, 0.12, 0.002, -0.001),
+    )
+    means = mx.array([[0.75, 0.45, 0.0]])
+    quats = mx.array([[1.0, 0.0, 0.0, 0.0]])
+    scales = mx.full((1, 3), 1e-4)
+
+    ut = project_gaussians_ut(cam, means, quats, scales)
+    distorted_center, _ = cam.project_points(means)
+    ewa = project_gaussians(cam, means, quats, scales)
+
+    assert_close(ut["means2d"], distorted_center, atol=1e-3)
+    assert float(mx.abs(ewa["means2d"] - distorted_center).max()) > 0.25
+    assert float(ut["radii"][0]) > 0
+
+
+def test_ut_projection_close_to_ewa_for_pinhole_small_gaussians():
+    cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), fov=55.0, width=96, height=64)
+    means = mx.array([[0.0, 0.0, 0.0], [0.2, -0.1, 0.3]])
+    quats = mx.array([[1.0, 0.0, 0.0, 0.0], [0.9, 0.1, 0.2, 0.3]])
+    scales = mx.full((2, 3), 1e-3)
+
+    ewa = project_gaussians(cam, means, quats, scales)
+    ut = project_gaussians_ut(cam, means, quats, scales)
+
+    assert_close(ut["means2d"], ewa["means2d"], atol=1e-3)
+    np.testing.assert_allclose(np.array(ut["conics"]), np.array(ewa["conics"]), rtol=0.05)
 
 
 def test_projection_matches_matrix_formula():
@@ -120,6 +162,37 @@ def test_projection_matches_matrix_formula():
     assert_close(out["conics"], conics, atol=1e-4)
     assert_close(out["depths"], z, atol=1e-5)
     assert_close(out["radii"], radii, atol=0)
+    assert_close(out["compensation"], mx.ones_like(out["compensation"]), atol=0)
+
+
+def test_projection_antialias_compensation_matches_isotropic_formula():
+    cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), width=64, height=64, fov=60.0)
+    scales = mx.array([[0.001, 0.001, 0.001], [0.1, 0.1, 0.1]])
+    out = project_gaussians(
+        cam,
+        mx.zeros((2, 3)),
+        mx.array([[1.0, 0, 0, 0], [1.0, 0, 0, 0]]),
+        scales,
+        antialias=True,
+    )
+
+    var = (cam.fx * scales[:, 0] / 3.0) ** 2
+    expected = var / (var + 0.3)
+    assert_close(out["compensation"], expected, atol=1e-5)
+    comp = np.array(out["compensation"])
+    assert (comp >= 0.0).all()
+    assert (comp <= 1.0).all()
+    assert comp[0] < comp[1]
+
+    no_blur = project_gaussians(
+        cam,
+        mx.zeros((1, 3)),
+        mx.array([[1.0, 0, 0, 0]]),
+        mx.array([[0.001, 0.001, 0.001]]),
+        blur=0.0,
+        antialias=True,
+    )
+    assert_close(no_blur["compensation"], mx.ones((1,)), atol=0)
 
 
 def test_binning_covers_visible_gaussians(random_scene):
@@ -167,6 +240,43 @@ def test_kernel_matches_reference_forward_refined_tiles(random_scene):
     assert_close(out_k["alpha"], out_r["alpha"], atol=1e-3)
 
 
+def test_antialiased_render_matches_reference_and_reduces_alpha(random_scene):
+    cam, means, quats, scales, opac, colors = random_scene
+    bg = mx.array([0.1, 0.2, 0.3])
+    # Keep opacity low enough that the early-transmittance cutoff does not make
+    # monotonicity ambiguous by skipping different tail splats.
+    opac = opac * 0.1
+    out_plain = render_gaussians(cam, means, quats, scales, opac, colors=colors, background=bg)
+    out_k = render_gaussians(
+        cam,
+        means,
+        quats,
+        scales,
+        opac,
+        colors=colors,
+        background=bg,
+        antialias=True,
+    )
+    out_r = render_gaussians_reference(
+        cam,
+        means,
+        quats,
+        scales,
+        opac,
+        colors,
+        background=bg,
+        antialias=True,
+    )
+
+    assert_close(out_k["image"], out_r["image"], atol=1e-3)
+    assert_close(out_k["alpha"], out_r["alpha"], atol=1e-3)
+    assert float((out_k["alpha"] - out_plain["alpha"]).max()) <= 1e-6
+    comp = np.array(out_k["compensation"])
+    assert (comp >= 0.0).all()
+    assert (comp <= 1.0).all()
+    assert (comp < 1.0).any()
+
+
 def test_depth_rasterization_outputs_valid_depth(random_scene):
     cam, means, quats, scales, opac, _ = random_scene
     out = render_gaussian_depth(cam, means, quats, scales, opac)
@@ -177,6 +287,104 @@ def test_depth_rasterization_outputs_valid_depth(random_scene):
     depth = np.array(out["depth"])
     assert np.isfinite(depth[valid]).all()
     assert depth[valid].min() > 0.0
+
+
+def test_feature_rasterization_matches_reference_with_padding(random_scene):
+    cam, means, quats, scales, opac, _ = random_scene
+    features = mx.concatenate(
+        [
+            means,
+            mx.arange(means.shape[0] * 2, dtype=mx.float32).reshape(means.shape[0], 2)
+            / means.shape[0],
+        ],
+        axis=1,
+    )
+    bg = mx.linspace(-0.2, 0.2, features.shape[1])
+
+    out_k = render_gaussian_features(cam, means, quats, scales, opac, features, background=bg)
+    out_r = render_gaussians_reference(cam, means, quats, scales, opac, features, background=bg)
+
+    assert out_k["features"].shape == (cam.height, cam.width, 5)
+    assert_close(out_k["features"], out_r["image"], atol=1e-3)
+    assert_close(out_k["alpha"], out_r["alpha"], atol=1e-3)
+
+
+def test_feature_rasterization_normalized_depth_matches_depth_kernel(random_scene):
+    cam, means, quats, scales, opac, _ = random_scene
+    depth = render_gaussian_depth(cam, means, quats, scales, opac)
+    feat = render_gaussian_features(
+        cam,
+        means,
+        quats,
+        scales,
+        opac,
+        depth["depths"][:, None],
+        background=mx.array([10.0]),
+        normalize=True,
+    )
+
+    valid = np.array(depth["alpha"]) > 1e-3
+    assert feat["features"].shape == (cam.height, cam.width, 1)
+    assert_close(feat["alpha"], depth["alpha"], atol=1e-5)
+    np.testing.assert_allclose(
+        np.array(feat["features"][..., 0])[valid],
+        np.array(depth["depth"])[valid],
+        atol=1e-4,
+    )
+    # Normalized outputs ignore background and stay zero where no splats hit.
+    empty = ~valid
+    if empty.any():
+        assert np.abs(np.array(feat["features"][..., 0])[empty]).max() < 1e-6
+
+
+def test_feature_rasterization_gradients_match_reference():
+    mx.random.seed(16)
+    n = 40
+    cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), width=32, height=24, fov=55.0)
+    means = mx.random.normal((n, 3)) * 0.35
+    quats = mx.random.normal((n, 4))
+    scales = mx.exp(mx.random.normal((n, 3)) * 0.2 - 2.4)
+    opac = mx.sigmoid(mx.random.normal((n,)))
+    features = mx.random.normal((n, 5)) * 0.25
+    target = mx.random.normal((cam.height, cam.width, 5)) * 0.1
+    bg = mx.linspace(0.0, 0.4, 5)
+
+    def kernel_loss(means, quats, scales, opac, features):
+        out = render_gaussian_features(cam, means, quats, scales, opac, features, background=bg)
+        return ((out["features"] - target) ** 2).mean() + 0.03 * out["alpha"].mean()
+
+    def ref_loss(means, quats, scales, opac, features):
+        out = render_gaussians_reference(cam, means, quats, scales, opac, features, background=bg)
+        return ((out["image"] - target) ** 2).mean() + 0.03 * out["alpha"].mean()
+
+    gk = mx.grad(kernel_loss, argnums=(0, 1, 2, 3, 4))(means, quats, scales, opac, features)
+    gr = mx.grad(ref_loss, argnums=(0, 1, 2, 3, 4))(means, quats, scales, opac, features)
+    for name, a, b in zip(["means", "quats", "scales", "opac", "features"], gk, gr):
+        a, b = np.array(a), np.array(b)
+        scale = np.abs(b).max() + 1e-12
+        assert np.abs(a - b).max() / scale < 2e-3, f"gradient mismatch for {name}"
+
+
+def test_model_render_features_and_input_validation():
+    mx.random.seed(17)
+    model = GaussianModel.from_points(mx.random.normal((10, 3)) * 0.2, sh_degree=0)
+    cam = Camera.look_at(eye=(0, 0, -2.5), at=(0, 0, 0), width=24, height=16)
+    features = mx.random.normal((model.num_gaussians, 1))
+    out = model.render_features(cam, features, background=0.25)
+    assert out["features"].shape == (16, 24, 1)
+    assert not bool(mx.isnan(out["features"]).any())
+
+    with pytest.raises(ValueError, match="features must have shape"):
+        render_gaussian_features(
+            cam,
+            model.params["means"],
+            model.params["quats"],
+            model.scales_act,
+            model.opacities_act,
+            features[:, 0],
+        )
+    with pytest.raises(ValueError, match="same first dimension"):
+        model.render_features(cam, features[:-1])
 
 
 def test_kernel_matches_reference_gradients(random_scene):
@@ -213,6 +421,26 @@ def test_render_with_sh(random_scene):
     out = render_gaussians(cam, means, quats, scales, opac, sh=sh, sh_degree=3)
     assert out["image"].shape == (64, 96, 3)
     assert not bool(mx.isnan(out["image"]).any())
+
+
+def test_render_and_trainer_support_ut_projection():
+    mx.random.seed(16)
+    cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), width=24, height=24, fov=60.0)
+    model = GaussianModel.from_points(mx.random.normal((18, 3)) * 0.25, sh_degree=0)
+
+    out = model.render(cam, projection="ut")
+    assert out["image"].shape == (24, 24, 3)
+    assert not bool(mx.isnan(out["image"]).any())
+    with pytest.raises(ValueError, match="projection"):
+        model.render(cam, projection="bad")
+    with pytest.raises(ValueError, match="projection"):
+        GaussianTrainer(model, TrainerConfig(projection="bad"))
+
+    target = mx.random.uniform(shape=(24, 24, 3))
+    trainer = GaussianTrainer(model, TrainerConfig(projection="ut", densify_from=10_000))
+    info = trainer.step(cam, target)
+    assert np.isfinite(info["loss"])
+    assert info["num_gaussians"] == model.num_gaussians
 
 
 def test_model_from_points_and_render():
@@ -258,6 +486,62 @@ def test_model_2dgs_constraints_clamp_local_normal_scale():
     np.testing.assert_allclose(scales[:, :2], 0.5, atol=1e-6)
 
 
+def test_model_surfel_points_filters_caps_and_orients_normals():
+    pts = mx.stack([mx.array([float(i), 0.0, 0.0]) for i in range(5)], axis=0)
+    model = GaussianModel.from_points(pts, sh_degree=0)
+    model.params["opacities"] = mx.array([-8.0, 2.0, 1.0, 4.0, -9.0])
+    model.params["scales"] = mx.log(
+        mx.array(
+            [
+                [10.0, 10.0, 0.01],
+                [0.1, 0.1, 0.01],
+                [3.0, 3.0, 0.01],
+                [1.0, 4.0, 0.01],
+                [20.0, 20.0, 0.01],
+            ]
+        )
+    )
+
+    surfels, normals = model.surfel_points(
+        min_opacity=0.01,
+        max_points=2,
+        orient_towards=(0.0, 0.0, -1.0),
+    )
+
+    np.testing.assert_allclose(np.array(surfels[:, 0]), [2.0, 3.0], atol=1e-6)
+    np.testing.assert_allclose(np.array(normals), [[0.0, 0.0, -1.0]] * 2, atol=1e-6)
+    with pytest.raises(ValueError, match="max_points"):
+        model.surfel_points(max_points=0)
+
+
+def test_model_extract_surface_mesh_uses_selected_surfels(monkeypatch):
+    pts = mx.random.normal((6, 3)) * 0.1
+    model = GaussianModel.from_points(pts, sh_degree=0)
+    captured = {}
+
+    def fake_reconstruct(points, normals, resolution, padding):
+        captured["points"] = points
+        captured["normals"] = normals
+        captured["resolution"] = resolution
+        captured["padding"] = padding
+        faces = mx.array([[0, 1, 2]], dtype=mx.int32)
+        return Meshes([points[:3]], [faces])
+
+    import mlx3d.ops as ops
+
+    monkeypatch.setattr(ops, "poisson_reconstruction", fake_reconstruct)
+
+    mesh = model.extract_surface_mesh(resolution=12, padding=0.2, max_points=4)
+
+    assert isinstance(mesh, Meshes)
+    assert captured["points"].shape == (4, 3)
+    assert captured["normals"].shape == (4, 3)
+    assert captured["resolution"] == 12
+    assert captured["padding"] == 0.2
+    with pytest.raises(ValueError, match="resolution"):
+        model.extract_surface_mesh(resolution=1)
+
+
 def test_model_ply_roundtrip(tmp_path):
     pts = mx.random.normal((20, 3))
     model = GaussianModel.from_points(pts, sh_degree=2)
@@ -268,6 +552,60 @@ def test_model_ply_roundtrip(tmp_path):
     assert loaded.sh_degree == 2
     for k in model.params:
         assert_close(loaded.params[k], model.params[k], atol=1e-5)
+
+
+def test_model_compact_prunes_by_opacity_and_cap_without_mutating():
+    pts = mx.stack([mx.array([float(i), 0.0, 0.0]) for i in range(6)], axis=0)
+    model = GaussianModel.from_points(pts, sh_degree=2)
+    model.active_sh_degree = 2
+    model.params["opacities"] = mx.array([-8.0, 2.0, -4.0, 4.0, 1.0, -7.0])
+    model.params["scales"] = mx.log(
+        mx.array(
+            [
+                [0.1, 0.1, 0.1],
+                [0.2, 0.2, 0.2],
+                [5.0, 5.0, 5.0],
+                [1.0, 1.0, 1.0],
+                [0.4, 0.4, 0.4],
+                [10.0, 10.0, 10.0],
+            ]
+        )
+    )
+
+    compact = model.compact(min_opacity=0.01, max_gaussians=2)
+
+    assert model.num_gaussians == 6
+    assert compact.num_gaussians == 2
+    # Row 2 has low opacity but a very large footprint; row 3 is highly opaque.
+    np.testing.assert_allclose(np.array(compact.params["means"][:, 0]), [2.0, 3.0], atol=1e-6)
+    assert compact.sh_degree == 2
+    assert compact.active_sh_degree == 2
+
+
+def test_model_compact_truncates_sh_degree_and_keeps_renderable_row():
+    model = GaussianModel.from_points(mx.random.normal((4, 3)) * 0.1, sh_degree=3)
+    model.active_sh_degree = 3
+    model.params["sh_rest"] = mx.random.normal(model.params["sh_rest"].shape) * 0.1
+    model.params["opacities"] = mx.full((4,), -20.0)
+
+    compact = model.compact(min_opacity=0.99, target_sh_degree=1)
+
+    assert compact.num_gaussians == 1
+    assert compact.sh_degree == 1
+    assert compact.active_sh_degree == 1
+    assert compact.sh.shape == (1, 4, 3)
+    cam = Camera.look_at(eye=(0, 0, -2.0), at=(0, 0, 0), width=16, height=16)
+    out = compact.render(cam)
+    assert out["image"].shape == (16, 16, 3)
+    assert not bool(mx.isnan(out["image"]).any())
+
+
+def test_model_compact_validates_inputs():
+    model = GaussianModel.from_points(mx.random.normal((3, 3)), sh_degree=1)
+    with pytest.raises(ValueError, match="max_gaussians"):
+        model.compact(max_gaussians=0)
+    with pytest.raises(ValueError, match="target_sh_degree"):
+        model.compact(target_sh_degree=2)
 
 
 def test_densify_and_prune():
@@ -470,6 +808,43 @@ def test_trainer_2dgs_keeps_surfel_thickness_after_densify():
     scales = np.array(mx.exp(model.params["scales"]))
     assert np.all(scales[:, 2] <= 0.002001)
     assert trainer.grad_accum.shape == (model.num_gaussians,)
+
+
+def test_trainer_2dgs_geometry_loss_is_opt_in_and_reported():
+    mx.random.seed(15)
+    cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), width=20, height=20)
+    target = mx.random.uniform(shape=(20, 20, 3))
+    model = GaussianModel.from_points(mx.random.normal((24, 3)) * 0.35, sh_degree=0)
+    params = {k: mx.array(v) for k, v in model.params.items()}
+    probe = mx.zeros((model.num_gaussians, 2))
+    bg = mx.zeros((3,))
+
+    base = GaussianTrainer(model.copy(), TrainerConfig(method="2dgs", densify_from=10_000))
+    weighted = GaussianTrainer(
+        model.copy(),
+        TrainerConfig(
+            method="2dgs",
+            densify_from=10_000,
+            lambda_2d_depth_variance=0.1,
+            lambda_2d_normal_consistency=0.05,
+            geometry_min_alpha=0.001,
+        ),
+    )
+
+    base_loss, (_, _, base_metrics) = base._render_loss(params, probe, cam, target, bg)
+    weighted_loss, (_, _, weighted_metrics) = weighted._render_loss(params, probe, cam, target, bg)
+
+    assert float(weighted_loss) >= float(base_loss)
+    assert float(base_metrics["depth_variance"]) == 0.0
+    assert float(base_metrics["normal_consistency"]) == 0.0
+    assert float(weighted_metrics["depth_variance"]) >= 0.0
+    assert float(weighted_metrics["normal_consistency"]) >= 0.0
+
+    info = weighted.step(cam, target)
+    assert np.isfinite(info["loss"])
+    assert set(info["geometry"]) == {"depth_variance", "normal_consistency"}
+    assert info["geometry"]["depth_variance"] >= 0.0
+    assert info["geometry"]["normal_consistency"] >= 0.0
 
 
 def test_trainer_max_gaussians_cap():

@@ -7,6 +7,7 @@ from .shading import (
     AmbientLights,
     DirectionalLights,
     PointLights,
+    pbr_shading,
     phong_shading,
     render_mesh,
 )
@@ -19,6 +20,7 @@ __all__ = [
     "RenderOutput",
     "Renderer",
     "interpolate_face_attributes",
+    "pbr_shading",
     "phong_shading",
     "rasterize_meshes",
     "render_mesh",

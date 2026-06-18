@@ -21,7 +21,7 @@ import mlx.core as mx
 
 from .tiles import TILE_SIZE
 
-__all__ = ["rasterize", "rasterize_depth"]
+__all__ = ["rasterize", "rasterize_depth", "rasterize_features"]
 
 _BLOCK = TILE_SIZE * TILE_SIZE  # threads per tile / batch size
 
@@ -275,8 +275,8 @@ _DEPTH_SRC = """
             if (alpha < 1.0f / 255.0f) continue;
             const float weight = alpha * T;
             const float next_T = T * (1.0f - alpha);
+            if (next_T < 1e-4f) { done = true; break; }
             depth_acc += sm_depth[j] * weight;
-            if (next_T < 1e-4f) { T = next_T; done = true; break; }
             T = next_T;
         }
     }
@@ -443,6 +443,105 @@ def rasterize(
         "alpha": 1.0 - final_T,
         "final_T": final_T,
         "n_contrib": n_contrib,
+    }
+
+
+def rasterize_features(
+    means2d: mx.array,
+    conics: mx.array,
+    features: mx.array,
+    opacities: mx.array,
+    sorted_ids: mx.array,
+    tile_ranges: mx.array,
+    width: int,
+    height: int,
+    tiles_x: int,
+    tiles_y: int,
+    background: mx.array | None = None,
+    normalize: bool = False,
+) -> dict[str, mx.array]:
+    """Alpha-composite arbitrary per-Gaussian feature channels.
+
+    This reuses the optimized RGB forward/backward Metal kernels in chunks of
+    three channels. It is intentionally memory-bounded: only one ``(H, W, 3)``
+    output is materialized per chunk, while MLX autodiff sums gradients from
+    each chunk back into the shared Gaussian parameters.
+
+    Args:
+        features: ``(N, C)`` per-Gaussian features.
+        background: optional ``(C,)`` feature background. Ignored when
+            ``normalize=True`` because normalized features are expected values
+            over accumulated alpha, not composited background values.
+        normalize: if ``True``, return expected features
+            ``sum_i alpha_i T_i feature_i / alpha`` with zeros where
+            ``alpha == 0``. This is useful for depth, normals, embeddings, and
+            semantic logits. If ``False``, return the usual alpha-composited
+            feature buffer including ``background``.
+
+    Returns:
+        dict with ``features`` (H, W, C), ``alpha`` (H, W), and the saved
+        auxiliary buffers ``final_T`` / ``n_contrib`` from the first chunk.
+    """
+    if features.ndim != 2:
+        raise ValueError("features must have shape (N, C).")
+    if features.shape[0] != means2d.shape[0]:
+        raise ValueError("features and means2d must have the same first dimension.")
+    channels = int(features.shape[1])
+    if channels <= 0:
+        raise ValueError("features must contain at least one channel.")
+
+    if background is None or normalize:
+        bg = mx.zeros((channels,), dtype=features.dtype)
+    else:
+        bg = mx.array(background, dtype=features.dtype)
+        if bg.ndim == 0:
+            bg = mx.broadcast_to(bg, (channels,))
+        if bg.shape != (channels,):
+            raise ValueError(f"background must have shape ({channels},).")
+
+    chunks: list[mx.array] = []
+    first: dict[str, mx.array] | None = None
+    for start in range(0, channels, 3):
+        end = min(start + 3, channels)
+        take = end - start
+        feat_chunk = features[:, start:end]
+        bg_chunk = bg[start:end]
+        if take < 3:
+            pad = 3 - take
+            feat_chunk = mx.concatenate(
+                [feat_chunk, mx.zeros((features.shape[0], pad), dtype=features.dtype)],
+                axis=1,
+            )
+            bg_chunk = mx.concatenate([bg_chunk, mx.zeros((pad,), dtype=features.dtype)], axis=0)
+
+        out = rasterize(
+            means2d,
+            conics,
+            feat_chunk,
+            opacities,
+            sorted_ids,
+            tile_ranges,
+            width,
+            height,
+            tiles_x,
+            tiles_y,
+            background=bg_chunk,
+        )
+        if first is None:
+            first = out
+        chunks.append(out["image"][..., :take])
+
+    assert first is not None
+    feat = mx.concatenate(chunks, axis=-1)
+    alpha = first["alpha"]
+    if normalize:
+        feat = mx.where(alpha[..., None] > 1e-6, feat / mx.maximum(alpha[..., None], 1e-6), 0.0)
+
+    return {
+        "features": feat,
+        "alpha": alpha,
+        "final_T": first["final_T"],
+        "n_contrib": first["n_contrib"],
     }
 
 

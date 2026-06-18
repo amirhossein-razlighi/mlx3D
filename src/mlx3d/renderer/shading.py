@@ -8,10 +8,13 @@ satisfies the :class:`~mlx3d.renderer.Renderer` protocol and returns
 
 Lighting is plain Lambert + Blinn-Phong in world space and is fully
 differentiable, so light/material/vertex parameters can all be optimized.
+An optional PBR path uses a compact Cook-Torrance/GGX shader for
+metallic/roughness material previews.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import mlx.core as mx
@@ -26,6 +29,7 @@ __all__ = [
     "AmbientLights",
     "DirectionalLights",
     "PointLights",
+    "pbr_shading",
     "phong_shading",
     "render_mesh",
 ]
@@ -151,6 +155,72 @@ def phong_shading(
     return mx.clip(color, 0.0, 1.0)
 
 
+def _direct_light_terms(light: Light, points: mx.array) -> tuple[mx.array | None, mx.array]:
+    if isinstance(light, AmbientLights):
+        return None, light.ambient
+    if isinstance(light, DirectionalLights):
+        return light._to_light(points), _arr(light.color)
+    return light._to_light(points), _arr(light.color)
+
+
+def pbr_shading(
+    points: mx.array,
+    normals: mx.array,
+    albedo: mx.array,
+    camera_center: mx.array,
+    lights: list[Light],
+    roughness: float | mx.array = 0.5,
+    metallic: float | mx.array = 0.0,
+) -> mx.array:
+    """Cook-Torrance/GGX material shading.
+
+    This is a compact real-time PBR shader: GGX normal distribution, Schlick
+    Fresnel, and Smith-Schlick geometry term. It is not a full environment-lit
+    renderer, but it gives glTF-style base-color/metallic/roughness controls
+    with stable MLX autodiff.
+    """
+    n = normals
+    v = _arr(camera_center) - points
+    v = v / mx.maximum(mx.linalg.norm(v, axis=-1, keepdims=True), 1e-8)
+    rough = mx.clip(_arr(roughness), 0.04, 1.0)
+    metal = mx.clip(_arr(metallic), 0.0, 1.0)
+    if rough.ndim == 0:
+        rough = mx.broadcast_to(rough, albedo.shape[:-1] + (1,))
+    if metal.ndim == 0:
+        metal = mx.broadcast_to(metal, albedo.shape[:-1] + (1,))
+
+    f0 = 0.04 * (1.0 - metal) + albedo * metal
+    ambient = mx.zeros((3,))
+    color = mx.zeros_like(albedo)
+    alpha = rough * rough
+    alpha2 = alpha * alpha
+    k = ((rough + 1.0) ** 2) / 8.0
+    n_dot_v = mx.maximum(mx.sum(n * v, axis=-1, keepdims=True), 1e-5)
+
+    for light in lights:
+        light_dir, light_color = _direct_light_terms(light, points)
+        if light_dir is None:
+            ambient = ambient + light_color
+            continue
+        h = light_dir + v
+        h = h / mx.maximum(mx.linalg.norm(h, axis=-1, keepdims=True), 1e-8)
+        n_dot_l = mx.maximum(mx.sum(n * light_dir, axis=-1, keepdims=True), 0.0)
+        n_dot_h = mx.maximum(mx.sum(n * h, axis=-1, keepdims=True), 0.0)
+        v_dot_h = mx.maximum(mx.sum(v * h, axis=-1, keepdims=True), 0.0)
+
+        denom = n_dot_h * n_dot_h * (alpha2 - 1.0) + 1.0
+        D = alpha2 / mx.maximum(math.pi * denom * denom, 1e-8)
+        Gv = n_dot_v / mx.maximum(n_dot_v * (1.0 - k) + k, 1e-8)
+        Gl = n_dot_l / mx.maximum(n_dot_l * (1.0 - k) + k, 1e-8)
+        F = f0 + (1.0 - f0) * ((1.0 - v_dot_h) ** 5)
+        specular = (D * Gv * Gl * F) / mx.maximum(4.0 * n_dot_v * n_dot_l, 1e-6)
+        diffuse = (1.0 - F) * (1.0 - metal) * albedo / math.pi
+        color = color + (diffuse + specular) * light_color * n_dot_l
+
+    color = color + ambient * albedo * (1.0 - metal)
+    return mx.clip(color, 0.0, 1.0)
+
+
 def render_mesh(
     camera: Camera,
     mesh_or_verts: Meshes | mx.array,
@@ -162,6 +232,8 @@ def render_mesh(
     lights: list[Light] | None = None,
     shininess: float = 32.0,
     specular_strength: float = 0.3,
+    roughness: float | mx.array = 0.5,
+    metallic: float | mx.array = 0.0,
     background: tuple[float, float, float] | float = 0.0,
     shading: str = "phong",
     ssaa: int = 1,
@@ -187,7 +259,9 @@ def render_mesh(
         faces_uvs: ``(F, 3)`` per-corner indices into ``verts_uvs``.
         lights: light list; defaults to one key light + ambient. ``shading="none"``
             ignores lights and returns flat albedo.
-        shading: ``"phong"`` or ``"none"`` (unlit albedo).
+        shading: ``"phong"``, ``"pbr"``, or ``"none"`` (unlit albedo).
+        roughness: scalar or ``(H, W, 1)`` material roughness for ``shading="pbr"``.
+        metallic: scalar or ``(H, W, 1)`` material metalness for ``shading="pbr"``.
         background: scalar or ``(3,)`` background color.
 
     Returns:
@@ -206,6 +280,8 @@ def render_mesh(
             lights,
             shininess,
             specular_strength,
+            roughness,
+            metallic,
             background,
             shading,
             ssaa=1,
@@ -250,15 +326,28 @@ def render_mesh(
         view_dir = _arr(camera.camera_center) - positions
         facing = mx.sum(normals_px * view_dir, axis=-1, keepdims=True) < 0
         normals_px = mx.where(facing, -normals_px, normals_px)
-        image = phong_shading(
-            positions,
-            normals_px,
-            albedo,
-            camera.camera_center,
-            lights,
-            shininess,
-            specular_strength,
-        )
+        if shading == "phong":
+            image = phong_shading(
+                positions,
+                normals_px,
+                albedo,
+                camera.camera_center,
+                lights,
+                shininess,
+                specular_strength,
+            )
+        elif shading == "pbr":
+            image = pbr_shading(
+                positions,
+                normals_px,
+                albedo,
+                camera.camera_center,
+                lights,
+                roughness=roughness,
+                metallic=metallic,
+            )
+        else:
+            raise ValueError("shading must be 'phong', 'pbr', or 'none'.")
 
     alpha = frag.valid.astype(mx.float32)
     bg = _arr(background)

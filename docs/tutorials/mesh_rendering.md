@@ -3,6 +3,12 @@
 MLX3D includes a differentiable soft mesh rasterizer for optimization loops,
 UV texture rendering for OBJ assets, and scalar-field mesh extraction.
 
+<p align="center">
+  <img src="../../assets/render_lit_sphere.png" width="42%" />
+  <img src="../../assets/render_lit_torus.png" width="42%" />
+</p>
+<p align="center"><em>Material and lighting previews rendered by MLX3D's hard mesh rasterizer and shader stack.</em></p>
+
 ## Soft Rasterization
 
 `render_mesh_soft` projects triangles through an MLX3D camera and blends them
@@ -51,6 +57,35 @@ out = render_mesh_soft(
 ```
 
 MLX3D uses OBJ UV convention for sampling: `v=0` is the bottom of the image.
+
+## Textured glTF / GLB Assets
+
+In 0.2.0, glTF loading covers default-scene nodes, triangle primitives, node
+transforms, UVs, material IDs, PBR base-color factors, metallic/roughness
+factors, and base-color textures from data URIs, external images, or GLB
+bufferViews. `save_gltf(..., texture_image=...)` writes a self-contained GLB
+with an embedded PNG texture, which is useful for portable examples and
+asset previews.
+
+```python
+from mlx3d.io import load_gltf
+from mlx3d.renderer import render_mesh
+from mlx3d.structures import Meshes
+
+asset = load_gltf("textured_asset.glb")
+mesh = Meshes([asset.verts], [asset.faces])
+
+out = render_mesh(
+    cam,
+    mesh,
+    texture=asset.texture_image,
+    verts_uvs=asset.uvs,
+    faces_uvs=asset.faces,
+    shading="pbr",
+    roughness=asset.materials[0].roughness_factor,
+    metallic=asset.materials[0].metallic_factor,
+)
+```
 
 ## Mesh Extraction
 

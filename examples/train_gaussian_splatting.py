@@ -162,6 +162,17 @@ def main() -> None:
         help="training strategy; vanilla 3DGS is the default",
     )
     parser.add_argument(
+        "--antialias",
+        action="store_true",
+        help="enable Mip-Splatting-style opacity compensation for projection blur",
+    )
+    parser.add_argument(
+        "--projection",
+        choices=["ewa", "ut"],
+        default="ewa",
+        help="Gaussian projection: fast analytic EWA or 3DGUT-style Unscented Transform",
+    )
+    parser.add_argument(
         "--densify-from",
         type=int,
         default=500,
@@ -212,6 +223,26 @@ def main() -> None:
         type=float,
         default=1e-4,
         help="2DGS mode: local-normal thickness as a fraction of scene extent",
+    )
+    parser.add_argument(
+        "--2d-depth-variance",
+        dest="two_d_depth_variance",
+        type=float,
+        default=0.0,
+        help="2DGS mode: weight for per-pixel depth variance regularization",
+    )
+    parser.add_argument(
+        "--2d-normal-consistency",
+        dest="two_d_normal_consistency",
+        type=float,
+        default=0.0,
+        help="2DGS mode: weight for rendered-normal vs depth-normal consistency",
+    )
+    parser.add_argument(
+        "--geometry-min-alpha",
+        type=float,
+        default=0.05,
+        help="minimum alpha used by 2DGS geometry regularizers",
     )
     parser.add_argument(
         "--cache-limit-gb", type=float, default=2.0, help="MLX buffer-cache cap used with --low-mem"
@@ -347,6 +378,8 @@ def main() -> None:
     )
     config = TrainerConfig(
         method=args.method,
+        antialias=args.antialias,
+        projection=args.projection,
         white_background=white_bg,
         densify_from=args.densify_from,
         densify_until=args.densify_until if args.densify_until is not None else args.iters // 2,
@@ -357,6 +390,9 @@ def main() -> None:
         mcmc_jitter_scale=args.mcmc_jitter_scale,
         mcmc_noise_scale=args.mcmc_noise_scale,
         two_d_thickness=args.two_d_thickness,
+        lambda_2d_depth_variance=args.two_d_depth_variance,
+        lambda_2d_normal_consistency=args.two_d_normal_consistency,
+        geometry_min_alpha=args.geometry_min_alpha,
         max_gaussians=max_gaussians,
         low_memory=args.low_mem,
         cache_limit_gb=args.cache_limit_gb,
