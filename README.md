@@ -92,28 +92,6 @@ uv run mkdocs serve   # docs at http://127.0.0.1:8000
 
 Contributions are welcome — file an issue to get started.
 
-## Roadmap
-
-- [x] Meshes / Pointclouds structures, cameras, transforms
-- [x] OBJ / PLY IO
-- [x] knn, chamfer, surface sampling, mesh losses, SSIM/PSNR
-- [x] NeRF (hierarchical sampling, volume rendering)
-- [x] Differentiable point splatting renderer
-- [x] 3D Gaussian Splatting with Metal forward/backward kernels
-- [x] COLMAP / Blender dataset loaders
-- [x] Differentiable mesh rasterizer (soft rasterization)
-- [x] Textured mesh rendering (`.mtl`, UV textures)
-- [x] Optimizer-state-preserving densification for 3DGS
-- [x] Configurable 3DGS training method with vanilla default and MCMC-style fixed-budget relocation
-- [x] 2DGS / surfel-style Gaussian mode with local-normal thickness constraints
-- [x] 2DGS geometry losses and surfel surface extraction helpers
-- [x] Mip-Splatting-style anti-aliasing / opacity compensation
-- [x] Additional well-known splatting recipes (compression, 3DGUT-style variants)
-- [x] Viewer depth-map mode for Gaussian checkpoints
-- [x] Viewer mesh-style inspection with GPU-efficient depth contours
-- [x] Marching cubes / mesh extraction
-- [x] More acceleration structures (hash-grid encodings for NeRF)
-
 ## License
 
 MIT
