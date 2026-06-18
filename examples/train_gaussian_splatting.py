@@ -162,6 +162,11 @@ def main() -> None:
         help="training strategy; vanilla 3DGS is the default",
     )
     parser.add_argument(
+        "--antialias",
+        action="store_true",
+        help="enable Mip-Splatting-style opacity compensation for projection blur",
+    )
+    parser.add_argument(
         "--densify-from",
         type=int,
         default=500,
@@ -347,6 +352,7 @@ def main() -> None:
     )
     config = TrainerConfig(
         method=args.method,
+        antialias=args.antialias,
         white_background=white_bg,
         densify_from=args.densify_from,
         densify_until=args.densify_until if args.densify_until is not None else args.iters // 2,

@@ -46,6 +46,17 @@ out["image"]   # (720, 1280, 3) — differentiable w.r.t. all inputs
 out["alpha"]   # (720, 1280) accumulated opacity — also differentiable
 ```
 
+For scenes with tiny/high-frequency splats, enable anti-aliasing:
+
+```python
+out = render_gaussians(..., antialias=True)
+```
+
+This keeps the standard screen-space blur but applies the Mip-Splatting-style
+opacity compensation \( \sqrt{\det(\Sigma) / \det(\Sigma + \epsilon I)} \),
+which reduces over-bright subpixel Gaussians without changing the default
+3DGS-compatible rendering path.
+
 The same Metal path can render arbitrary per-Gaussian feature channels in
 chunks of three, reusing the RGB kernel and its backward pass:
 
@@ -89,6 +100,9 @@ To watch training as it happens, start the live viewer from the same command:
 python examples/train_gaussian_splatting.py --data /path/to/scene \
     --iters 7000 --downscale 4 --viewer
 ```
+
+Pass `--antialias` to train with the same opacity compensation used by
+`render_gaussians(..., antialias=True)`.
 
 The viewer opens a local browser page and polls lightweight metadata while
 requesting rendered JPEG frames only when the view changes. Training publishes a
