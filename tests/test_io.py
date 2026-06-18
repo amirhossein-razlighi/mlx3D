@@ -1,3 +1,6 @@
+import base64
+import json
+
 import mlx.core as mx
 import numpy as np
 import pytest
@@ -30,6 +33,102 @@ def test_gltf_save_without_normals(tmp_path):
     g = load_gltf(path)
     assert g.normals is None
     assert g.faces.shape == mesh.faces_packed().shape
+
+
+def test_gltf_roundtrip_uvs_and_material(tmp_path):
+    verts = mx.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    faces = mx.array([[0, 1, 2]])
+    uvs = mx.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    path = str(tmp_path / "textured.glb")
+    save_gltf(path, verts, faces, uvs=uvs, material_base_color=(0.2, 0.4, 0.6, 1.0))
+
+    g = load_gltf(path)
+
+    assert_close(g.uvs, uvs)
+    assert g.material_ids.tolist() == [0]
+    assert g.materials is not None
+    assert g.materials[0].base_color == (0.2, 0.4, 0.6, 1.0)
+
+
+def _pack_gltf_buffer(arrays):
+    blob = b""
+    views = []
+    accessors = []
+    for arr, component_type, typ, target in arrays:
+        arr = np.asarray(arr)
+        offset = len(blob)
+        raw = arr.tobytes()
+        blob += raw + b"\x00" * ((4 - len(raw) % 4) % 4)
+        views.append(
+            {
+                "buffer": 0,
+                "byteOffset": offset,
+                "byteLength": len(raw),
+                "target": target,
+            }
+        )
+        accessors.append(
+            {
+                "bufferView": len(views) - 1,
+                "componentType": component_type,
+                "count": int(arr.shape[0]),
+                "type": typ,
+            }
+        )
+    return blob, views, accessors
+
+
+def test_gltf_loads_scene_nodes_primitives_transforms_and_material_ids(tmp_path):
+    p0 = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+    f0 = np.array([0, 1, 2], dtype=np.uint16)
+    p1 = np.array([[0, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=np.float32)
+    f1 = np.array([0, 1, 2], dtype=np.uint16)
+    blob, views, accessors = _pack_gltf_buffer(
+        [
+            (p0, 5126, "VEC3", 34962),
+            (f0, 5123, "SCALAR", 34963),
+            (p1, 5126, "VEC3", 34962),
+            (f1, 5123, "SCALAR", 34963),
+        ]
+    )
+    gltf = {
+        "asset": {"version": "2.0"},
+        "scene": 0,
+        "scenes": [{"nodes": [0, 1]}],
+        "nodes": [
+            {"mesh": 0},
+            {"mesh": 1, "translation": [10.0, 0.0, 0.0]},
+        ],
+        "meshes": [
+            {"primitives": [{"attributes": {"POSITION": 0}, "indices": 1, "material": 0}]},
+            {"primitives": [{"attributes": {"POSITION": 2}, "indices": 3, "material": 1}]},
+        ],
+        "materials": [
+            {"name": "red", "pbrMetallicRoughness": {"baseColorFactor": [1, 0, 0, 1]}},
+            {"name": "green", "pbrMetallicRoughness": {"baseColorFactor": [0, 1, 0, 1]}},
+        ],
+        "buffers": [
+            {
+                "byteLength": len(blob),
+                "uri": "data:application/octet-stream;base64,"
+                + base64.b64encode(blob).decode("ascii"),
+            }
+        ],
+        "bufferViews": views,
+        "accessors": accessors,
+    }
+    path = tmp_path / "scene.gltf"
+    path.write_text(json.dumps(gltf))
+
+    g = load_gltf(str(path))
+
+    assert g.verts.shape == (6, 3)
+    assert g.faces.tolist() == [[0, 1, 2], [3, 4, 5]]
+    np.testing.assert_allclose(np.array(g.verts[:3]), p0, atol=1e-6)
+    np.testing.assert_allclose(np.array(g.verts[3:]), p1 + np.array([10, 0, 0]), atol=1e-6)
+    assert g.material_ids.tolist() == [0, 1]
+    assert g.materials is not None
+    assert [m.name for m in g.materials] == ["red", "green"]
 
 
 @pytest.fixture
