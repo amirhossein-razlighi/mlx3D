@@ -113,7 +113,15 @@ def test_gltf_loads_embedded_base_color_texture(tmp_path):
                 ]
             }
         ],
-        "materials": [{"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}],
+        "materials": [
+            {
+                "pbrMetallicRoughness": {
+                    "baseColorTexture": {"index": 0},
+                    "metallicFactor": 0.25,
+                    "roughnessFactor": 0.8,
+                }
+            }
+        ],
         "textures": [{"source": 0}],
         "images": [{"uri": _png_data_uri(tex)}],
         "buffers": [
@@ -136,6 +144,8 @@ def test_gltf_loads_embedded_base_color_texture(tmp_path):
     np.testing.assert_allclose(np.array(g.texture_image), tex.astype(np.float32) / 255.0)
     assert g.materials is not None
     assert g.materials[0].base_color_texture == 0
+    assert g.materials[0].metallic_factor == 0.25
+    assert g.materials[0].roughness_factor == 0.8
     assert_close(g.uvs, uv)
 
 

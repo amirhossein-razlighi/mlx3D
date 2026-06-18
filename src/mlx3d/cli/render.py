@@ -4,15 +4,28 @@ from __future__ import annotations
 
 import argparse
 import os
+from dataclasses import dataclass
 
 import mlx.core as mx
 
 from ..cameras import Camera
 from ..io import load_gltf, load_obj, load_ply, save_image
+from ..io.gltf_io import GltfData
 from ..renderer import render_mesh
 from ..splatting import GaussianModel
 from ..structures import Meshes
 from ..transforms import quaternion_to_matrix
+
+
+@dataclass
+class _MeshAsset:
+    mesh: Meshes
+    colors: mx.array | None = None
+    uvs: mx.array | None = None
+    face_uvs: mx.array | None = None
+    texture: mx.array | None = None
+    roughness: float | None = None
+    metallic: float | None = None
 
 
 def _vec3(values: list[float], name: str) -> tuple[float, float, float]:
@@ -57,9 +70,25 @@ def _is_gaussian_ply(path: str) -> bool:
     return needed.issubset(extra.keys())
 
 
-def _load_mesh(
-    path: str,
-) -> tuple[Meshes, mx.array | None, mx.array | None, mx.array | None, mx.array | None]:
+def _uniform_gltf_pbr_factors(data: GltfData) -> tuple[float | None, float | None]:
+    if not data.materials:
+        return None, None
+    if data.material_ids is None:
+        material_ids = {0} if len(data.materials) == 1 else set()
+    else:
+        material_ids = {int(i) for i in data.material_ids.tolist()}
+    material_ids = {i for i in material_ids if 0 <= i < len(data.materials)}
+    if not material_ids:
+        return None, None
+    roughness = {data.materials[i].roughness_factor for i in material_ids}
+    metallic = {data.materials[i].metallic_factor for i in material_ids}
+    return (
+        roughness.pop() if len(roughness) == 1 else None,
+        metallic.pop() if len(metallic) == 1 else None,
+    )
+
+
+def _load_mesh(path: str) -> _MeshAsset:
     ext = os.path.splitext(path)[1].lower()
     if ext in {".glb", ".gltf"}:
         data = load_gltf(path)
@@ -77,16 +106,31 @@ def _load_mesh(
                 verts_colors = verts_colors.at[data.faces[:, k]].add(colors)
                 counts = counts.at[data.faces[:, k]].add(mx.ones((data.faces.shape[0], 1)))
             verts_colors = verts_colors / mx.maximum(counts, 1.0)
-        return mesh, verts_colors, data.uvs, data.faces, data.texture_image
+        roughness, metallic = _uniform_gltf_pbr_factors(data)
+        return _MeshAsset(
+            mesh,
+            colors=verts_colors,
+            uvs=data.uvs,
+            face_uvs=data.faces,
+            texture=data.texture_image,
+            roughness=roughness,
+            metallic=metallic,
+        )
     if ext == ".obj":
         data = load_obj(path)
         mesh = Meshes([data.verts], [data.faces])
-        return mesh, data.verts_colors, data.texcoords, data.faces_texcoords_idx, data.texture_image
+        return _MeshAsset(
+            mesh,
+            colors=data.verts_colors,
+            uvs=data.texcoords,
+            face_uvs=data.faces_texcoords_idx,
+            texture=data.texture_image,
+        )
     if ext == ".ply":
         data = load_ply(path)
         if data.faces is None:
             raise ValueError("PLY mesh rendering requires face indices.")
-        return Meshes([data.verts], [data.faces]), data.colors, None, None, None
+        return _MeshAsset(Meshes([data.verts], [data.faces]), colors=data.colors)
     raise ValueError(f"Unsupported mesh input extension: {ext}")
 
 
@@ -111,18 +155,25 @@ def _render_gaussian(args: argparse.Namespace) -> mx.array:
 
 
 def _render_mesh(args: argparse.Namespace) -> mx.array:
-    mesh, colors, uvs, face_uvs, texture = _load_mesh(args.input)
+    asset = _load_mesh(args.input)
     cam = _camera(args)
+    shading = args.shading if args.shading is not None else ("none" if args.unlit else "phong")
+    material_kwargs = {}
+    if asset.roughness is not None:
+        material_kwargs["roughness"] = asset.roughness
+    if asset.metallic is not None:
+        material_kwargs["metallic"] = asset.metallic
     out = render_mesh(
         cam,
-        mesh,
-        verts_colors=colors,
-        texture=texture,
-        verts_uvs=uvs,
-        faces_uvs=face_uvs,
+        asset.mesh,
+        verts_colors=asset.colors,
+        texture=asset.texture,
+        verts_uvs=asset.uvs,
+        faces_uvs=asset.face_uvs,
         background=tuple(args.background),
-        shading="none" if args.unlit else "phong",
+        shading=shading,
         ssaa=args.ssaa,
+        **material_kwargs,
     )
     if args.mode == "depth":
         return _depth_to_rgb(out["depth"], out["alpha"])
@@ -146,6 +197,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--background", type=float, nargs=3, default=(0.0, 0.0, 0.0))
     parser.add_argument("--antialias", action="store_true", help="Gaussian opacity compensation")
     parser.add_argument("--ssaa", type=int, default=1, help="mesh supersampling factor")
+    parser.add_argument("--shading", choices=["phong", "pbr", "none"], default=None)
     parser.add_argument("--unlit", action="store_true", help="render mesh albedo without lighting")
     return parser
 
@@ -157,6 +209,8 @@ def main(argv: list[str] | None = None) -> None:
         parser.error("--width and --height must be positive.")
     if args.ssaa <= 0:
         parser.error("--ssaa must be positive.")
+    if args.unlit and args.shading is not None:
+        parser.error("--unlit cannot be combined with --shading.")
 
     kind = args.type
     if kind == "auto":

@@ -14,6 +14,8 @@ Release branch in progress.
   including node transforms, UVs, material IDs, and PBR base-color summaries.
 - glTF base-color texture loading for embedded/data-URI and external image
   assets, wired into `mlx3d-render` for textured mesh previews.
+- glTF metallic/roughness factor import, with `mlx3d-render --shading pbr`
+  forwarding uniform material factors into the PBR mesh shader.
 - glTF export of UV coordinates and a simple PBR base color material.
 - `mlx3d-render` CLI for rendering Gaussian checkpoints and mesh assets to
   RGB, depth, or normal images.

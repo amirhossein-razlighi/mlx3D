@@ -43,6 +43,8 @@ class GltfMaterial:
     name: str | None = None
     base_color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
     base_color_texture: int | None = None
+    metallic_factor: float = 1.0
+    roughness_factor: float = 1.0
 
 
 @dataclass
@@ -182,6 +184,8 @@ def _materials(gltf: dict) -> list[GltfMaterial]:
                 name=mat.get("name"),
                 base_color=color,  # type: ignore[arg-type]
                 base_color_texture=int(tex) if tex is not None else None,
+                metallic_factor=float(pbr.get("metallicFactor", 1.0)),
+                roughness_factor=float(pbr.get("roughnessFactor", 1.0)),
             )
         )
     return out
