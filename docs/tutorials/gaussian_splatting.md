@@ -175,6 +175,13 @@ ranks capped samples by surfel footprint, uses each Gaussian's local normal
 axis as the oriented point normal, and feeds those surfels to the Poisson
 reconstruction utility.
 
+For distorted or fisheye cameras, pass `--projection ut` in the training
+script or `projection="ut"` in the render APIs. This uses a 3DGUT-style
+Unscented Transform: six 3D sigma points are projected through the full
+`Camera.project_points` model, then converted back to a 2D Gaussian. It is
+slower than the default analytic EWA projection, but it respects Brown-Conrady,
+fisheye, and orthographic camera projection.
+
 Periodic saves render a deterministic held training view and report PSNR.
 Set `--eval-views N` to average that save-time PSNR over `N` evenly spaced
 training views while still saving the first rendered image. The default is one
@@ -196,7 +203,8 @@ NeRF-synthetic scenes and `--antialias` to score the anti-aliased render path.
     relocation is available with `--method mcmc`; surfel-style 2DGS is
     available with `--method 2dgs`. The 2DGS depth-variance and normal-depth
     consistency losses are explicit opt-ins rather than hidden changes to the
-    default path.
+    default path. The default projection remains fast analytic EWA; the
+    distortion-aware UT projection is selected explicitly with `--projection ut`.
 
 ## Low-memory training (8-16 GB Macs)
 

@@ -1,5 +1,5 @@
 from .model import GaussianModel
-from .projection import project_gaussians, quat_scale_to_cov3d
+from .projection import project_gaussians, project_gaussians_ut, quat_scale_to_cov3d
 from .rasterize import rasterize, rasterize_depth, rasterize_features
 from .reference import render_gaussians_reference
 from .render import render_gaussian_depth, render_gaussian_features, render_gaussians
@@ -16,6 +16,7 @@ __all__ = [
     "eval_sh",
     "num_sh_bases",
     "project_gaussians",
+    "project_gaussians_ut",
     "quat_scale_to_cov3d",
     "rasterize",
     "rasterize_depth",

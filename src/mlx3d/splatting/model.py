@@ -148,6 +148,7 @@ class GaussianModel:
         camera: Camera,
         background: mx.array | None = None,
         antialias: bool = False,
+        projection: str = "ewa",
     ) -> dict:
         return render_gaussians(
             camera,
@@ -159,9 +160,15 @@ class GaussianModel:
             sh_degree=self.active_sh_degree,
             background=background,
             antialias=antialias,
+            projection=projection,
         )
 
-    def render_depth(self, camera: Camera, antialias: bool = False) -> dict:
+    def render_depth(
+        self,
+        camera: Camera,
+        antialias: bool = False,
+        projection: str = "ewa",
+    ) -> dict:
         return render_gaussian_depth(
             camera,
             self.params["means"],
@@ -169,6 +176,7 @@ class GaussianModel:
             self.scales_act,
             self.opacities_act,
             antialias=antialias,
+            projection=projection,
         )
 
     def render_features(
@@ -178,6 +186,7 @@ class GaussianModel:
         background: mx.array | None = None,
         normalize: bool = False,
         antialias: bool = False,
+        projection: str = "ewa",
     ) -> dict:
         """Render arbitrary per-Gaussian feature channels from this model."""
         return render_gaussian_features(
@@ -190,6 +199,7 @@ class GaussianModel:
             background=background,
             normalize=normalize,
             antialias=antialias,
+            projection=projection,
         )
 
     def one_up_sh_degree(self) -> None:

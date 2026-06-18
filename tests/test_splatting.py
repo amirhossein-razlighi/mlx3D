@@ -11,6 +11,7 @@ from mlx3d.splatting import (
     eval_sh,
     num_sh_bases,
     project_gaussians,
+    project_gaussians_ut,
     render_gaussian_depth,
     render_gaussian_features,
     render_gaussians,
@@ -69,6 +70,45 @@ def test_projection_culls_behind_camera():
         cam, mx.array([[0.0, 0.0, -10.0]]), mx.array([[1.0, 0, 0, 0]]), mx.full((1, 3), 0.1)
     )
     assert float(proj["radii"][0]) == 0.0
+
+
+def test_ut_projection_respects_camera_distortion():
+    base = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), fov=60.0, width=128, height=128)
+    cam = Camera(
+        R=base.R,
+        t=base.t,
+        fx=base.fx,
+        fy=base.fy,
+        cx=base.cx,
+        cy=base.cy,
+        width=base.width,
+        height=base.height,
+        distortion=(-0.35, 0.12, 0.002, -0.001),
+    )
+    means = mx.array([[0.75, 0.45, 0.0]])
+    quats = mx.array([[1.0, 0.0, 0.0, 0.0]])
+    scales = mx.full((1, 3), 1e-4)
+
+    ut = project_gaussians_ut(cam, means, quats, scales)
+    distorted_center, _ = cam.project_points(means)
+    ewa = project_gaussians(cam, means, quats, scales)
+
+    assert_close(ut["means2d"], distorted_center, atol=1e-3)
+    assert float(mx.abs(ewa["means2d"] - distorted_center).max()) > 0.25
+    assert float(ut["radii"][0]) > 0
+
+
+def test_ut_projection_close_to_ewa_for_pinhole_small_gaussians():
+    cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), fov=55.0, width=96, height=64)
+    means = mx.array([[0.0, 0.0, 0.0], [0.2, -0.1, 0.3]])
+    quats = mx.array([[1.0, 0.0, 0.0, 0.0], [0.9, 0.1, 0.2, 0.3]])
+    scales = mx.full((2, 3), 1e-3)
+
+    ewa = project_gaussians(cam, means, quats, scales)
+    ut = project_gaussians_ut(cam, means, quats, scales)
+
+    assert_close(ut["means2d"], ewa["means2d"], atol=1e-3)
+    np.testing.assert_allclose(np.array(ut["conics"]), np.array(ewa["conics"]), rtol=0.05)
 
 
 def test_projection_matches_matrix_formula():
@@ -389,6 +429,26 @@ def test_render_with_sh(random_scene):
     out = render_gaussians(cam, means, quats, scales, opac, sh=sh, sh_degree=3)
     assert out["image"].shape == (64, 96, 3)
     assert not bool(mx.isnan(out["image"]).any())
+
+
+def test_render_and_trainer_support_ut_projection():
+    mx.random.seed(16)
+    cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), width=24, height=24, fov=60.0)
+    model = GaussianModel.from_points(mx.random.normal((18, 3)) * 0.25, sh_degree=0)
+
+    out = model.render(cam, projection="ut")
+    assert out["image"].shape == (24, 24, 3)
+    assert not bool(mx.isnan(out["image"]).any())
+    with pytest.raises(ValueError, match="projection"):
+        model.render(cam, projection="bad")
+    with pytest.raises(ValueError, match="projection"):
+        GaussianTrainer(model, TrainerConfig(projection="bad"))
+
+    target = mx.random.uniform(shape=(24, 24, 3))
+    trainer = GaussianTrainer(model, TrainerConfig(projection="ut", densify_from=10_000))
+    info = trainer.step(cam, target)
+    assert np.isfinite(info["loss"])
+    assert info["num_gaussians"] == model.num_gaussians
 
 
 def test_model_from_points_and_render():

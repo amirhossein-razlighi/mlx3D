@@ -139,9 +139,9 @@ def _render_gaussian(args: argparse.Namespace) -> mx.array:
     cam = _camera(args)
     bg = mx.array(args.background, dtype=mx.float32)
     if args.mode == "depth":
-        out = model.render_depth(cam, antialias=args.antialias)
+        out = model.render_depth(cam, antialias=args.antialias, projection=args.projection)
         return _depth_to_rgb(out["depth"], out["alpha"])
-    out = model.render(cam, background=bg, antialias=args.antialias)
+    out = model.render(cam, background=bg, antialias=args.antialias, projection=args.projection)
     if args.mode == "normal":
         normals = quaternion_to_matrix(model.params["quats"])[:, :, 2]
         normals = model.render_features(
@@ -149,6 +149,7 @@ def _render_gaussian(args: argparse.Namespace) -> mx.array:
             normals,
             normalize=True,
             antialias=args.antialias,
+            projection=args.projection,
         )
         return _normal_to_rgb(normals["features"], normals["alpha"])
     return out["image"]
@@ -196,6 +197,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--up", type=float, nargs=3, default=(0.0, 1.0, 0.0))
     parser.add_argument("--background", type=float, nargs=3, default=(0.0, 0.0, 0.0))
     parser.add_argument("--antialias", action="store_true", help="Gaussian opacity compensation")
+    parser.add_argument(
+        "--projection",
+        choices=["ewa", "ut"],
+        default="ewa",
+        help="Gaussian projection: fast EWA or 3DGUT-style Unscented Transform",
+    )
     parser.add_argument("--ssaa", type=int, default=1, help="mesh supersampling factor")
     parser.add_argument("--shading", choices=["phong", "pbr", "none"], default=None)
     parser.add_argument("--unlit", action="store_true", help="render mesh albedo without lighting")
