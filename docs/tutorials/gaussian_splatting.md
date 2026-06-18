@@ -46,6 +46,31 @@ out["image"]   # (720, 1280, 3) — differentiable w.r.t. all inputs
 out["alpha"]   # (720, 1280) accumulated opacity — also differentiable
 ```
 
+The same Metal path can render arbitrary per-Gaussian feature channels in
+chunks of three, reusing the RGB kernel and its backward pass:
+
+```python
+from mlx3d.splatting import render_gaussian_features
+
+features = mx.concatenate(
+    [depths[:, None], normals, semantic_logits], axis=-1
+)  # (N, C)
+
+out = render_gaussian_features(
+    camera,
+    means,
+    quats,
+    scales,
+    opacities,
+    features,
+    normalize=True,  # expected feature = sum(alpha_i T_i f_i) / alpha
+)
+out["features"]  # (720, 1280, C)
+```
+
+Use `normalize=False` with a feature-space `background` when you want ordinary
+alpha compositing instead of expected features.
+
 On an M-series GPU, 100k Gaussians render at ~30 FPS at 720p, with a full
 forward+backward training step around 100 ms.
 
