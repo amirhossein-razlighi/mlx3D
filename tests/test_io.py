@@ -51,6 +51,45 @@ def test_gltf_roundtrip_uvs_and_material(tmp_path):
     assert g.materials[0].base_color == (0.2, 0.4, 0.6, 1.0)
 
 
+def test_gltf_roundtrip_embedded_texture_image(tmp_path):
+    verts = mx.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    faces = mx.array([[0, 1, 2]])
+    uvs = mx.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    tex = mx.array(
+        [
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            [[0.0, 0.0, 1.0], [1.0, 1.0, 0.0]],
+        ]
+    )
+    path = str(tmp_path / "textured.glb")
+
+    save_gltf(
+        path,
+        verts,
+        faces,
+        uvs=uvs,
+        material_base_color=(1.0, 1.0, 1.0, 1.0),
+        texture_image=tex,
+    )
+    g = load_gltf(path)
+
+    assert_close(g.uvs, uvs)
+    assert g.texture_image is not None
+    assert g.texture_image.shape == tex.shape
+    np.testing.assert_allclose(np.array(g.texture_image), np.array(tex), atol=1 / 255)
+    assert g.materials is not None
+    assert g.materials[0].base_color_texture == 0
+
+
+def test_gltf_save_texture_requires_uvs(tmp_path):
+    verts = mx.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    faces = mx.array([[0, 1, 2]])
+    tex = mx.ones((2, 2, 3))
+
+    with pytest.raises(ValueError, match="uvs"):
+        save_gltf(str(tmp_path / "bad.glb"), verts, faces, texture_image=tex)
+
+
 def _png_data_uri(rgb: np.ndarray) -> str:
     buf = io.BytesIO()
     Image.fromarray(rgb.astype(np.uint8)).save(buf, format="PNG")

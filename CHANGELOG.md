@@ -16,6 +16,8 @@ Release branch in progress.
   assets, wired into `mlx3d-render` for textured mesh previews.
 - glTF metallic/roughness factor import, with `mlx3d-render --shading pbr`
   forwarding uniform material factors into the PBR mesh shader.
+- glTF export of self-contained GLB assets with embedded base-color PNG
+  textures.
 - glTF export of UV coordinates and a simple PBR base color material.
 - `mlx3d-render` CLI for rendering Gaussian checkpoints and mesh assets to
   RGB, depth, or normal images.
