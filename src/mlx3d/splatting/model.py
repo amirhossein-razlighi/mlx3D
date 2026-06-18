@@ -194,6 +194,71 @@ class GaussianModel:
         if self.active_sh_degree < self.sh_degree:
             self.active_sh_degree += 1
 
+    # -------------------------------------------------------------- compaction
+    def copy(self) -> "GaussianModel":
+        """Return a detached copy of the Gaussian table."""
+        out = GaussianModel({k: mx.array(v) for k, v in self.params.items()}, self.sh_degree)
+        out.active_sh_degree = self.active_sh_degree
+        return out
+
+    def compact(
+        self,
+        min_opacity: float = 0.0,
+        max_gaussians: int | None = None,
+        target_sh_degree: int | None = None,
+    ) -> "GaussianModel":
+        """Return a smaller checkpoint by pruning low-importance Gaussians.
+
+        Importance is a conservative, view-independent proxy:
+        ``sigmoid(opacity) * max(scale)^2``. This keeps opaque large-footprint
+        splats before transparent/subpixel ones, preserves the original order
+        of retained rows for checkpoint diffability, and does not mutate this
+        model.
+
+        Args:
+            min_opacity: prune Gaussians with activated opacity below this
+                threshold. If the threshold removes every row, the most
+                important Gaussian is kept so the checkpoint remains renderable.
+            max_gaussians: optional hard cap; the highest-importance rows are
+                retained.
+            target_sh_degree: optional lower SH degree for color coefficient
+                truncation. This reduces checkpoint size and render cost for
+                view-dependent color at the expense of angular detail.
+        """
+        if max_gaussians is not None and max_gaussians <= 0:
+            raise ValueError("max_gaussians must be positive when provided.")
+        if target_sh_degree is not None and not (0 <= target_sh_degree <= self.sh_degree):
+            raise ValueError("target_sh_degree must be between 0 and the model sh_degree.")
+
+        n = self.num_gaussians
+        if n == 0:
+            return self.copy()
+
+        opacity = np.array(self.opacities_act)
+        max_scale = np.array(self.scales_act).max(axis=1)
+        importance = opacity * max_scale * max_scale
+        keep = opacity >= float(min_opacity)
+        if not keep.any():
+            keep[int(np.argmax(importance))] = True
+
+        keep_idx = np.where(keep)[0]
+        if max_gaussians is not None and keep_idx.size > max_gaussians:
+            local = np.argpartition(-importance[keep_idx], max_gaussians - 1)[:max_gaussians]
+            keep_idx = keep_idx[local]
+        keep_idx = np.sort(keep_idx.astype(np.int32))
+        idx = mx.array(keep_idx)
+        params = {k: v[idx] for k, v in self.params.items()}
+
+        sh_degree = self.sh_degree
+        if target_sh_degree is not None:
+            sh_degree = int(target_sh_degree)
+            k = num_sh_bases(sh_degree)
+            params["sh_rest"] = params["sh_rest"][:, : max(0, k - 1), :]
+
+        out = GaussianModel(params, sh_degree=sh_degree)
+        out.active_sh_degree = min(self.active_sh_degree, sh_degree)
+        return out
+
     # ------------------------------------------------------------- checkpoints
     def save_ply(self, path: str) -> None:
         """Save in the standard 3DGS PLY layout (compatible with most viewers)."""

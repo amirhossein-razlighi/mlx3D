@@ -445,6 +445,60 @@ def test_model_ply_roundtrip(tmp_path):
         assert_close(loaded.params[k], model.params[k], atol=1e-5)
 
 
+def test_model_compact_prunes_by_opacity_and_cap_without_mutating():
+    pts = mx.stack([mx.array([float(i), 0.0, 0.0]) for i in range(6)], axis=0)
+    model = GaussianModel.from_points(pts, sh_degree=2)
+    model.active_sh_degree = 2
+    model.params["opacities"] = mx.array([-8.0, 2.0, -4.0, 4.0, 1.0, -7.0])
+    model.params["scales"] = mx.log(
+        mx.array(
+            [
+                [0.1, 0.1, 0.1],
+                [0.2, 0.2, 0.2],
+                [5.0, 5.0, 5.0],
+                [1.0, 1.0, 1.0],
+                [0.4, 0.4, 0.4],
+                [10.0, 10.0, 10.0],
+            ]
+        )
+    )
+
+    compact = model.compact(min_opacity=0.01, max_gaussians=2)
+
+    assert model.num_gaussians == 6
+    assert compact.num_gaussians == 2
+    # Row 2 has low opacity but a very large footprint; row 3 is highly opaque.
+    np.testing.assert_allclose(np.array(compact.params["means"][:, 0]), [2.0, 3.0], atol=1e-6)
+    assert compact.sh_degree == 2
+    assert compact.active_sh_degree == 2
+
+
+def test_model_compact_truncates_sh_degree_and_keeps_renderable_row():
+    model = GaussianModel.from_points(mx.random.normal((4, 3)) * 0.1, sh_degree=3)
+    model.active_sh_degree = 3
+    model.params["sh_rest"] = mx.random.normal(model.params["sh_rest"].shape) * 0.1
+    model.params["opacities"] = mx.full((4,), -20.0)
+
+    compact = model.compact(min_opacity=0.99, target_sh_degree=1)
+
+    assert compact.num_gaussians == 1
+    assert compact.sh_degree == 1
+    assert compact.active_sh_degree == 1
+    assert compact.sh.shape == (1, 4, 3)
+    cam = Camera.look_at(eye=(0, 0, -2.0), at=(0, 0, 0), width=16, height=16)
+    out = compact.render(cam)
+    assert out["image"].shape == (16, 16, 3)
+    assert not bool(mx.isnan(out["image"]).any())
+
+
+def test_model_compact_validates_inputs():
+    model = GaussianModel.from_points(mx.random.normal((3, 3)), sh_degree=1)
+    with pytest.raises(ValueError, match="max_gaussians"):
+        model.compact(max_gaussians=0)
+    with pytest.raises(ValueError, match="target_sh_degree"):
+        model.compact(target_sh_degree=2)
+
+
 def test_densify_and_prune():
     pts = mx.random.normal((50, 3))
     model = GaussianModel.from_points(pts, sh_degree=1)
