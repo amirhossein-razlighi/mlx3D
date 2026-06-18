@@ -43,6 +43,7 @@ dev = [
 ]
 
 [project.scripts]
+mlx3d-compact = "mlx3d.cli.compact:main"
 mlx3d-eval = "mlx3d.cli.eval:main"
 mlx3d-view = "mlx3d.viewer.__main__:main"
 mlx3d-render = "mlx3d.cli.render:main"
