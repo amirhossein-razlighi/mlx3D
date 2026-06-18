@@ -79,6 +79,16 @@ This is not a full environment-lit offline renderer; it is a fast, differentiabl
 material model for inspecting glTF-style assets and optimizing material
 parameters inside MLX.
 
+In 0.2.0, `mlx3d-render` can load textured glTF/GLB meshes and forward uniform
+glTF metallic/roughness factors into this PBR shader:
+
+```bash
+mlx3d-render model.glb --type mesh --out preview.png --shading pbr --ssaa 2
+```
+
+For asset-heavy workflows, this gives a quick local preview before you move to
+a full DCC tool or game engine.
+
 ## Antialiasing and render passes
 
 Pass `ssaa=N` to supersample (render at `N x` resolution and box-downsample) for

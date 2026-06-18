@@ -7,6 +7,9 @@ CUDA rasterizer — tile-based forward **and** backward kernels — wrapped in
 Full script:
 [`examples/train_gaussian_splatting.py`](https://github.com/amirhossein-razlighi/mlx3D/blob/main/examples/train_gaussian_splatting.py).
 
+<p align="center"><img src="../../assets/v020_truck_render_hi.png" width="92%" /></p>
+<p align="center"><em>Truck scene rendered from a trained 3DGS checkpoint with the MLX3D Metal rasterizer and anti-aliasing enabled.</em></p>
+
 ## How the renderer works
 
 1. **Projection** (pure MLX, autodiff): each Gaussian's quaternion + scale
@@ -81,6 +84,15 @@ out["features"]  # (720, 1280, C)
 
 Use `normalize=False` with a feature-space `background` when you want ordinary
 alpha compositing instead of expected features.
+
+The packaged render CLI exposes the same paths for checkpoints. These are
+real outputs from the truck checkpoint:
+
+<p align="center">
+  <img src="../../assets/v020_truck_depth_hi.png" width="45%" />
+  <img src="../../assets/v020_truck_normals_hi.png" width="45%" />
+</p>
+<p align="center"><em>Expected depth and rendered Gaussian normal features from the same truck checkpoint.</em></p>
 
 On an M-series GPU, 100k Gaussians render at ~30 FPS at 720p, with a full
 forward+backward training step around 100 ms.
@@ -181,6 +193,17 @@ Unscented Transform: six 3D sigma points are projected through the full
 `Camera.project_points` model, then converted back to a 2D Gaussian. It is
 slower than the default analytic EWA projection, but it respects Brown-Conrady,
 fisheye, and orthographic camera projection.
+
+For command-line renders:
+
+```bash
+mlx3d-render outputs/gs_truck/point_cloud.ply \
+    --out truck.png --width 1280 --height 720 --antialias --up 0 -1 0
+mlx3d-render outputs/gs_truck/point_cloud.ply \
+    --mode depth --out truck_depth.png --up 0 -1 0
+mlx3d-render outputs/gs_truck/point_cloud.ply \
+    --mode normal --out truck_normals.png --up 0 -1 0
+```
 
 Periodic saves render a deterministic held training view and report PSNR.
 Set `--eval-views N` to average that save-time PSNR over `N` evenly spaced

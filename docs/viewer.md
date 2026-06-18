@@ -6,6 +6,9 @@ Metal rasterization kernels, so typical scenes orbit in real time — and
 streamed to a canvas page with orbit / pan / zoom controls. No extra
 dependencies, nothing to install.
 
+<p align="center"><img src="assets/v020_truck_render_hi.png" width="90%" /></p>
+<p align="center"><em>Truck checkpoint rendered by the same Gaussian renderer used by the browser viewer.</em></p>
+
 ## Viewing a Gaussian Splatting checkpoint
 
 Any 3DGS-format `.ply` (trained with MLX3D or elsewhere):
@@ -51,6 +54,11 @@ Depth uses a forward-only Metal splatting pass that accumulates
 transmittance-weighted expected depth per pixel, then colorizes it on the GPU
 before JPEG encoding. It is meant for geometry inspection during training and
 does not add work to the differentiable RGB training path.
+
+<p align="center">
+  <img src="assets/v020_truck_depth_hi.png" width="45%" />
+  <img src="assets/v020_truck_normals_hi.png" width="45%" />
+</p>
 
 The mesh-style mode uses the same GPU depth pass and overlays screen-space
 depth/alpha contours in MLX. It is a fast inspection view for geometry and
