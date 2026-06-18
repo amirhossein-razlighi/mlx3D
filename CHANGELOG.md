@@ -15,6 +15,8 @@ Release branch in progress.
 - glTF export of UV coordinates and a simple PBR base color material.
 - `mlx3d-render` CLI for rendering Gaussian checkpoints and mesh assets to
   RGB, depth, or normal images.
+- `mlx3d-eval` CLI for deterministic Gaussian checkpoint evaluation with PSNR,
+  SSIM, L1, per-view metrics, and JSON output.
 - Gaussian checkpoint compaction by opacity/footprint importance, Gaussian
   count cap, and optional spherical-harmonic degree truncation.
 

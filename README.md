@@ -52,6 +52,7 @@ Train Gaussian Splatting on any COLMAP scene (same inputs as the original 3DGS):
 python examples/train_gaussian_splatting.py --data /path/to/scene --iters 7000
 mlx3d-view outputs/gs/point_cloud.ply   # inspect the result interactively
 mlx3d-render outputs/gs/point_cloud.ply --out render.png --antialias
+mlx3d-eval outputs/gs/point_cloud.ply --data /path/to/scene --views 20 --json-out metrics.json
 ```
 
 More in the docs: [mesh optimization](https://amirhossein-razlighi.github.io/mlx3D/tutorials/mesh_optimization/), [point cloud fitting](https://amirhossein-razlighi.github.io/mlx3D/tutorials/pointcloud_fitting/), [NeRF](https://amirhossein-razlighi.github.io/mlx3D/tutorials/nerf/), [Gaussian Splatting](https://amirhossein-razlighi.github.io/mlx3D/tutorials/gaussian_splatting/).
