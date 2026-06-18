@@ -252,5 +252,21 @@ mlx3d-view outputs/gs/point_cloud.ply
 directly in common viewers (SuperSplat, Polycam viewer, gsplat tools, ...)
 and you can fine-tune checkpoints trained elsewhere.
 
+For smaller deployment checkpoints, compact a trained model before saving:
+
+```python
+compact = model.compact(
+    min_opacity=0.01,
+    max_gaussians=500_000,
+    target_sh_degree=2,
+)
+compact.save_ply("point_cloud_compact.ply")
+```
+
+Compaction ranks Gaussians by a view-independent footprint proxy,
+`opacity * max_scale^2`, preserves retained row order, and can lower the
+spherical-harmonic degree when view-dependent color detail is less important
+than file size and render cost.
+
 !!! note "Current limitations"
     - One camera per `step` call.
