@@ -12,6 +12,7 @@ Coordinates are passed through unchanged (glTF is right-handed, +Y up).
 from __future__ import annotations
 
 import base64
+import io
 import json
 import os
 import struct
@@ -209,7 +210,6 @@ def _image_bytes(gltf: dict, buffers: list[bytes], root_dir: str, image_idx: int
 def _load_texture_image(gltf: dict, buffers: list[bytes], root_dir: str, texture_idx: int) -> mx.array:
     tex = gltf["textures"][texture_idx]
     img_idx = int(tex["source"])
-    import io
 
     with Image.open(io.BytesIO(_image_bytes(gltf, buffers, root_dir, img_idx))) as img:
         arr = np.asarray(img.convert("RGB"), dtype=np.float32) / 255.0
@@ -327,6 +327,18 @@ def _pad4(b: bytes, fill: bytes = b"\x00") -> bytes:
     return b + fill * ((4 - len(b) % 4) % 4)
 
 
+def _texture_png_bytes(texture_image: mx.array) -> bytes:
+    tex = np.asarray(texture_image)
+    if tex.ndim != 3 or tex.shape[-1] not in (3, 4):
+        raise ValueError("texture_image must have shape (H, W, 3) or (H, W, 4).")
+    if np.issubdtype(tex.dtype, np.floating):
+        tex = np.clip(tex, 0.0, 1.0) * 255.0
+    tex = np.asarray(tex, dtype=np.uint8)
+    buf = io.BytesIO()
+    Image.fromarray(tex).save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def save_gltf(
     path: str,
     verts: mx.array,
@@ -334,12 +346,15 @@ def save_gltf(
     normals: mx.array | None = None,
     uvs: mx.array | None = None,
     material_base_color: tuple[float, float, float, float] | None = None,
+    texture_image: mx.array | None = None,
 ) -> None:
     """Save a triangle mesh as a self-contained binary ``.glb`` file."""
     v = np.asarray(verts, dtype=np.float32)
     f = np.asarray(faces, dtype=np.uint32).reshape(-1, 3)
     n = np.asarray(normals, dtype=np.float32) if normals is not None else None
     uv = np.asarray(uvs, dtype=np.float32) if uvs is not None else None
+    if texture_image is not None and uv is None:
+        raise ValueError("uvs are required when saving texture_image.")
 
     blob = b""
     views, accessors, attributes = [], [], {}
@@ -368,16 +383,23 @@ def save_gltf(
     if uv is not None:
         attributes["TEXCOORD_0"] = _add(uv, 34962, 5126, "VEC2", with_minmax=False)
     idx_accessor = _add(f.reshape(-1), 34963, 5125, "SCALAR", with_minmax=False)
+    texture_view = None
+    if texture_image is not None:
+        raw = _texture_png_bytes(texture_image)
+        offset = len(blob)
+        blob += _pad4(raw)
+        views.append({"buffer": 0, "byteOffset": offset, "byteLength": len(raw)})
+        texture_view = len(views) - 1
+
     prim = {"attributes": attributes, "indices": idx_accessor, "mode": 4}
     materials = []
-    if material_base_color is not None:
-        materials.append(
-            {
-                "pbrMetallicRoughness": {
-                    "baseColorFactor": [float(v) for v in material_base_color]
-                }
-            }
-        )
+    if material_base_color is not None or texture_view is not None:
+        pbr: dict[str, object] = {}
+        if material_base_color is not None:
+            pbr["baseColorFactor"] = [float(v) for v in material_base_color]
+        if texture_view is not None:
+            pbr["baseColorTexture"] = {"index": 0}
+        materials.append({"pbrMetallicRoughness": pbr})
         prim["material"] = 0
 
     gltf = {
@@ -392,6 +414,9 @@ def save_gltf(
     }
     if materials:
         gltf["materials"] = materials
+    if texture_view is not None:
+        gltf["images"] = [{"bufferView": texture_view, "mimeType": "image/png"}]
+        gltf["textures"] = [{"source": 0}]
 
     json_chunk = _pad4(json.dumps(gltf, separators=(",", ":")).encode("utf-8"), b" ")
     bin_chunk = _pad4(blob)
