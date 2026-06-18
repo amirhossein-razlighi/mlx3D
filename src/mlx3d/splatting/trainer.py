@@ -14,9 +14,10 @@ import numpy as np
 
 from ..cameras import Camera
 from ..losses import ssim
+from ..transforms import quaternion_to_matrix
 from .model import GaussianModel
 from .projection import project_gaussians
-from .rasterize import rasterize
+from .rasterize import rasterize, rasterize_features
 from .sh import eval_sh
 from .tiles import bin_gaussians
 
@@ -38,6 +39,12 @@ class TrainerConfig:
     lambda_dssim: float = 0.2
     antialias: bool = False
     """Use Mip-Splatting-style opacity compensation for projection blur."""
+    lambda_2d_depth_variance: float = 0.0
+    """2DGS-only ray-depth variance penalty; encourages one surface per pixel."""
+    lambda_2d_normal_consistency: float = 0.0
+    """2DGS-only loss between rendered surfel normals and depth-map normals."""
+    geometry_min_alpha: float = 0.05
+    """Minimum alpha for pixels included in 2DGS geometry losses."""
     # Adaptive density control.
     densify_from: int = 500
     densify_until: int = 15000
@@ -173,6 +180,83 @@ class GaussianTrainer:
             self.model.apply_2dgs_constraints(thickness)
 
     # ------------------------------------------------------------------ losses
+    def _geometry_loss_2dgs(
+        self,
+        params: dict[str, mx.array],
+        camera: Camera,
+        proj: dict[str, mx.array],
+        opacities: mx.array,
+        sorted_ids: mx.array,
+        tile_ranges: mx.array,
+        tiles_x: int,
+        tiles_y: int,
+    ) -> tuple[mx.array, dict[str, mx.array]]:
+        cfg = self.config
+        zero = mx.array(0.0, dtype=mx.float32)
+        metrics = {"depth_variance": zero, "normal_consistency": zero}
+        if (
+            cfg.method != "2dgs"
+            or (cfg.lambda_2d_depth_variance <= 0 and cfg.lambda_2d_normal_consistency <= 0)
+        ):
+            return zero, metrics
+
+        depths = proj["depths"]
+        normals = quaternion_to_matrix(params["quats"])[:, :, 2]
+        view = camera.camera_center - params["means"]
+        normals = normals / mx.maximum(mx.linalg.norm(normals, axis=-1, keepdims=True), 1e-8)
+        normals = mx.where(mx.sum(normals * view, axis=-1, keepdims=True) < 0, -normals, normals)
+        features = mx.concatenate([depths[:, None], (depths * depths)[:, None], normals], axis=1)
+        geom = rasterize_features(
+            proj["means2d"],
+            proj["conics"],
+            features,
+            opacities,
+            sorted_ids,
+            tile_ranges,
+            camera.width,
+            camera.height,
+            tiles_x,
+            tiles_y,
+            normalize=True,
+        )
+        alpha = geom["alpha"]
+        valid = (alpha > cfg.geometry_min_alpha).astype(mx.float32)
+        denom = mx.maximum(valid.sum(), 1.0)
+
+        expected_depth = geom["features"][..., 0]
+        expected_depth2 = geom["features"][..., 1]
+        depth_var = mx.maximum(expected_depth2 - expected_depth * expected_depth, 0.0)
+        loss = zero
+        if cfg.lambda_2d_depth_variance > 0:
+            metrics["depth_variance"] = (depth_var * valid).sum() / denom
+            loss = loss + float(cfg.lambda_2d_depth_variance) * metrics["depth_variance"]
+
+        if cfg.lambda_2d_normal_consistency > 0 and camera.width > 1 and camera.height > 1:
+            u = mx.arange(camera.width, dtype=mx.float32) + 0.5
+            v = mx.arange(camera.height, dtype=mx.float32) + 0.5
+            uu = mx.broadcast_to(u[None, :], (camera.height, camera.width))
+            vv = mx.broadcast_to(v[:, None], (camera.height, camera.width))
+            points = camera.unproject_points(mx.stack([uu, vv], axis=-1), expected_depth)
+            tangent_x = points[:-1, 1:] - points[:-1, :-1]
+            tangent_y = points[1:, :-1] - points[:-1, :-1]
+            depth_normals = mx.linalg.cross(tangent_x, tangent_y)
+            depth_normals = depth_normals / mx.maximum(
+                mx.linalg.norm(depth_normals, axis=-1, keepdims=True), 1e-8
+            )
+            rendered_normals = geom["features"][:-1, :-1, 2:5]
+            rendered_normals = rendered_normals / mx.maximum(
+                mx.linalg.norm(rendered_normals, axis=-1, keepdims=True), 1e-8
+            )
+            valid4 = (
+                valid[:-1, :-1] * valid[:-1, 1:] * valid[1:, :-1] * valid[1:, 1:]
+            )
+            denom4 = mx.maximum(valid4.sum(), 1.0)
+            cos = mx.sum(rendered_normals * depth_normals, axis=-1)
+            metrics["normal_consistency"] = ((1.0 - mx.abs(cos)) * valid4).sum() / denom4
+            loss = loss + float(cfg.lambda_2d_normal_consistency) * metrics["normal_consistency"]
+
+        return loss, metrics
+
     def _render_loss(
         self, params, means2d_probe, camera: Camera, target: mx.array, background: mx.array
     ):
@@ -217,7 +301,17 @@ class GaussianTrainer:
         l1 = mx.abs(img - target).mean()
         c = self.config.lambda_dssim
         loss = (1.0 - c) * l1 + c * (1.0 - ssim(img, target))
-        return loss, (img, proj["radii"])
+        geom_loss, geom_metrics = self._geometry_loss_2dgs(
+            params,
+            camera,
+            proj,
+            opacities,
+            sorted_ids,
+            tile_ranges,
+            tiles_x,
+            tiles_y,
+        )
+        return loss + geom_loss, (img, proj["radii"], geom_metrics)
 
     # -------------------------------------------------------------------- step
     def step(self, camera: Camera, target: mx.array) -> dict[str, object]:
@@ -235,7 +329,9 @@ class GaussianTrainer:
             loss, aux = self._render_loss(params, probe, camera, target, bg)
             return loss, aux
 
-        (loss, (img, radii)), grads = mx.value_and_grad(loss_fn, argnums=(0, 1))(params, probe)
+        (loss, (img, radii, geom_metrics)), grads = mx.value_and_grad(loss_fn, argnums=(0, 1))(
+            params, probe
+        )
         param_grads, probe_grad = grads
 
         for k, opt in self.optimizers.items():
@@ -319,4 +415,5 @@ class GaussianTrainer:
             "densify": densify_stats,
             "opacity_reset": opacity_reset,
             "sh_degree_changed": sh_degree_changed,
+            "geometry": {k: float(v) for k, v in geom_metrics.items()},
         }
