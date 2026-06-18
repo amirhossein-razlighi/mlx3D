@@ -50,6 +50,13 @@ out = model.render(camera)
 print(out["image"].shape)  # (720, 1280, 3)
 ```
 
+For checkpoints and mesh assets, render from the shell:
+
+```bash
+mlx3d-render point_cloud.ply --out render.png --antialias
+mlx3d-render mesh.glb --type mesh --mode depth --out depth.png
+```
+
 Continue with the [Quickstart](quickstart.md), then pick a tutorial:
 
 | Tutorial | What you build |
