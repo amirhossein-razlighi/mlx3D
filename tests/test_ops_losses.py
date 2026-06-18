@@ -112,6 +112,55 @@ def test_ray_mesh_intersect_nearest_of_two():
     assert int(out["face_idx"][0]) == 1  # the nearer triangle
 
 
+def test_ray_mesh_aabb_cull_matches_unculled_and_skips_chunks():
+    verts = mx.array(
+        [
+            [-1.0, -1.0, 2.0],
+            [1.0, -1.0, 2.0],
+            [0.0, 1.0, 2.0],
+            [100.0, 100.0, 2.0],
+            [102.0, 100.0, 2.0],
+            [101.0, 102.0, 2.0],
+        ]
+    )
+    faces = mx.array([[0, 1, 2], [3, 4, 5]], dtype=mx.int32)
+    mesh = Meshes([verts], [faces])
+    origins = mx.array([[0.0, 0.0, 0.0], [0.25, 0.25, 0.0]])
+    directions = mx.array([[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]])
+
+    culled = ray_mesh_intersect(
+        mesh, origins, directions, face_chunk_size=1, aabb_cull=True, return_stats=True
+    )
+    plain = ray_mesh_intersect(
+        mesh, origins, directions, face_chunk_size=1, aabb_cull=False, return_stats=True
+    )
+
+    np.testing.assert_array_equal(np.array(culled["hit"]), np.array(plain["hit"]))
+    np.testing.assert_allclose(np.array(culled["t"]), np.array(plain["t"]), atol=1e-6)
+    np.testing.assert_array_equal(np.array(culled["face_idx"]), np.array(plain["face_idx"]))
+    assert culled["stats"]["chunks_total"] == 2
+    assert culled["stats"]["chunks_skipped"] == 1
+    assert culled["stats"]["face_tests"] < plain["stats"]["face_tests"]
+
+
+def test_ray_mesh_aabb_cull_handles_parallel_rays_inside_slab():
+    verts = mx.array([[-1.0, -1.0, 2.0], [1.0, -1.0, 2.0], [0.0, 1.0, 2.0]])
+    faces = mx.array([[0, 1, 2]], dtype=mx.int32)
+    mesh = Meshes([verts], [faces])
+    out = ray_mesh_intersect(
+        mesh,
+        mx.array([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]]),
+        mx.array([[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]]),
+        face_chunk_size=1,
+        aabb_cull=True,
+        return_stats=True,
+    )
+
+    assert bool(out["hit"][0])
+    assert not bool(out["hit"][1])
+    assert out["stats"]["chunks_skipped"] == 0
+
+
 def test_subdivide_meshes_counts_and_validity():
     m = ico_sphere(level=2, radius=1.0)
     v, f, e = (

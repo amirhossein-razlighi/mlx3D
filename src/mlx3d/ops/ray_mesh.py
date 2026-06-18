@@ -11,13 +11,37 @@ __all__ = ["ray_mesh_intersect"]
 _INF = 1e30
 
 
+def _rays_intersect_aabb(
+    origins: mx.array,
+    directions: mx.array,
+    bmin: mx.array,
+    bmax: mx.array,
+    eps: float,
+) -> mx.array:
+    """Return a per-ray mask for intersection with one axis-aligned box."""
+    parallel = mx.abs(directions) <= eps
+    inside_parallel = (origins >= (bmin - eps)) & (origins <= (bmax + eps))
+    safe_d = mx.where(parallel, mx.ones_like(directions), directions)
+    t0 = (bmin - origins) / safe_d
+    t1 = (bmax - origins) / safe_d
+    lo = mx.minimum(t0, t1)
+    hi = mx.maximum(t0, t1)
+    lo = mx.where(parallel, mx.where(inside_parallel, -_INF, _INF), lo)
+    hi = mx.where(parallel, mx.where(inside_parallel, _INF, -_INF), hi)
+    near = mx.max(lo, axis=-1)
+    far = mx.min(hi, axis=-1)
+    return far >= mx.maximum(near, eps)
+
+
 def ray_mesh_intersect(
     meshes: Meshes,
     origins: mx.array,
     directions: mx.array,
     face_chunk_size: int = 4096,
     eps: float = 1e-8,
-) -> dict[str, mx.array]:
+    aabb_cull: bool = True,
+    return_stats: bool = False,
+) -> dict[str, object]:
     """Nearest ray-triangle hit per ray (Möller-Trumbore).
 
     Args:
@@ -26,7 +50,13 @@ def ray_mesh_intersect(
         directions: ``(R, 3)`` ray directions (need not be normalized; ``t`` is
             measured in units of ``directions``).
         face_chunk_size: faces per chunk, bounding the ``(R, F)`` memory.
-        eps: parallel/`degenerate-triangle tolerance.
+        eps: parallel / degenerate-triangle tolerance.
+        aabb_cull: if ``True``, test each face chunk's axis-aligned bounding
+            box before running the expensive ray-triangle math. This preserves
+            exact results and skips whole chunks for coherent rays or spatially
+            sorted meshes.
+        return_stats: include simple broad-phase counters useful for tests and
+            profiling.
 
     Returns:
         dict with ``hit`` ``(R,)`` bool, ``t`` ``(R,)`` hit distance (``inf`` on
@@ -42,10 +72,22 @@ def ray_mesh_intersect(
     best_t = mx.full((origins.shape[0],), _INF)
     best_f = mx.full((origins.shape[0],), -1, dtype=mx.int32)
     best_uv = mx.zeros((origins.shape[0], 2))
+    chunks_total = 0
+    chunks_skipped = 0
+    face_tests = 0
 
     for start in range(0, faces.shape[0], face_chunk_size):
         fchunk = faces[start : start + face_chunk_size]  # (C, 3)
         tri = verts[fchunk]  # (C, 3, 3)
+        chunks_total += 1
+        if aabb_cull:
+            bmin = mx.min(tri.reshape(-1, 3), axis=0)
+            bmax = mx.max(tri.reshape(-1, 3), axis=0)
+            chunk_hit = _rays_intersect_aabb(origins, directions, bmin, bmax, eps)
+            if not bool(mx.any(chunk_hit)):
+                chunks_skipped += 1
+                continue
+        face_tests += int(origins.shape[0]) * int(fchunk.shape[0])
         v0, v1, v2 = tri[:, 0, :], tri[:, 1, :], tri[:, 2, :]
         e1 = (v1 - v0)[None]  # (1, C, 3)
         e2 = (v2 - v0)[None]
@@ -77,10 +119,17 @@ def ray_mesh_intersect(
     bary = mx.stack([1.0 - u - v, u, v], axis=-1) * hit_mask[:, None]
     t_out = mx.where(hit_mask, best_t, mx.full(best_t.shape, mx.inf))
     points = origins + mx.where(hit_mask, best_t, 0.0)[:, None] * directions
-    return {
+    out = {
         "hit": hit_mask,
         "t": t_out,
         "face_idx": best_f,
         "bary": bary,
         "points": points,
     }
+    if return_stats:
+        out["stats"] = {
+            "chunks_total": chunks_total,
+            "chunks_skipped": chunks_skipped,
+            "face_tests": face_tests,
+        }
+    return out
