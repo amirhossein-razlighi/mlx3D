@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 import mlx.core as mx
 import numpy as np
+from PIL import Image
 
 __all__ = ["GltfData", "GltfMaterial", "load_gltf", "save_gltf"]
 
@@ -41,6 +42,7 @@ class GltfMaterial:
 
     name: str | None = None
     base_color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
+    base_color_texture: int | None = None
 
 
 @dataclass
@@ -54,6 +56,8 @@ class GltfData:
         uvs: ``(V, 2)`` texture coordinates, or ``None``.
         material_ids: ``(F,)`` material index per face, or ``None``.
         materials: decoded material summaries.
+        texture_image: first base-color texture image as ``(H, W, 3)`` in
+            ``[0, 1]`` when the scene uses one; ``None`` otherwise.
     """
 
     verts: mx.array
@@ -62,6 +66,7 @@ class GltfData:
     uvs: mx.array | None = None
     material_ids: mx.array | None = None
     materials: list[GltfMaterial] | None = None
+    texture_image: mx.array | None = None
 
 
 def _read_glb(path: str) -> tuple[dict, bytes]:
@@ -171,8 +176,40 @@ def _materials(gltf: dict) -> list[GltfMaterial]:
     for mat in gltf.get("materials", []):
         pbr = mat.get("pbrMetallicRoughness", {})
         color = tuple(float(v) for v in pbr.get("baseColorFactor", [1.0, 1.0, 1.0, 1.0]))
-        out.append(GltfMaterial(name=mat.get("name"), base_color=color))  # type: ignore[arg-type]
+        tex = pbr.get("baseColorTexture", {}).get("index")
+        out.append(
+            GltfMaterial(
+                name=mat.get("name"),
+                base_color=color,  # type: ignore[arg-type]
+                base_color_texture=int(tex) if tex is not None else None,
+            )
+        )
     return out
+
+
+def _image_bytes(gltf: dict, buffers: list[bytes], root_dir: str, image_idx: int) -> bytes:
+    image = gltf["images"][image_idx]
+    uri = image.get("uri")
+    if uri is not None:
+        if uri.startswith("data:"):
+            return base64.b64decode(uri.split(",", 1)[1])
+        with open(os.path.join(root_dir, uri), "rb") as f:
+            return f.read()
+    view = gltf["bufferViews"][image["bufferView"]]
+    raw = buffers[view["buffer"]]
+    start = view.get("byteOffset", 0)
+    end = start + view["byteLength"]
+    return raw[start:end]
+
+
+def _load_texture_image(gltf: dict, buffers: list[bytes], root_dir: str, texture_idx: int) -> mx.array:
+    tex = gltf["textures"][texture_idx]
+    img_idx = int(tex["source"])
+    import io
+
+    with Image.open(io.BytesIO(_image_bytes(gltf, buffers, root_dir, img_idx))) as img:
+        arr = np.asarray(img.convert("RGB"), dtype=np.float32) / 255.0
+    return mx.array(arr)
 
 
 def load_gltf(path: str) -> GltfData:
@@ -188,8 +225,13 @@ def load_gltf(path: str) -> GltfData:
         with open(path) as f:
             gltf = json.load(f)
         glb_bin = b""
-    buffers = _buffer_bytes(gltf, os.path.dirname(os.path.abspath(path)), glb_bin)
+    root_dir = os.path.dirname(os.path.abspath(path))
+    buffers = _buffer_bytes(gltf, root_dir, glb_bin)
     materials = _materials(gltf)
+    texture_ids = [m.base_color_texture for m in materials if m.base_color_texture is not None]
+    texture_image = None
+    if len(set(texture_ids)) == 1:
+        texture_image = _load_texture_image(gltf, buffers, root_dir, texture_ids[0])
 
     verts_parts: list[np.ndarray] = []
     faces_parts: list[np.ndarray] = []
@@ -273,6 +315,7 @@ def load_gltf(path: str) -> GltfData:
         uvs=mx.array(uvs) if uvs is not None else None,
         material_ids=mx.array(material_ids) if material_ids.size else None,
         materials=materials,
+        texture_image=texture_image,
     )
 
 

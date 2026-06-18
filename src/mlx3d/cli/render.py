@@ -57,13 +57,15 @@ def _is_gaussian_ply(path: str) -> bool:
     return needed.issubset(extra.keys())
 
 
-def _load_mesh(path: str) -> tuple[Meshes, mx.array | None, mx.array | None, mx.array | None]:
+def _load_mesh(
+    path: str,
+) -> tuple[Meshes, mx.array | None, mx.array | None, mx.array | None, mx.array | None]:
     ext = os.path.splitext(path)[1].lower()
     if ext in {".glb", ".gltf"}:
         data = load_gltf(path)
         mesh = Meshes([data.verts], [data.faces])
         verts_colors = None
-        if data.material_ids is not None and data.materials:
+        if data.texture_image is None and data.material_ids is not None and data.materials:
             colors = mx.zeros((data.faces.shape[0], 3), dtype=mx.float32)
             for mat_id, mat in enumerate(data.materials):
                 face_mask = data.material_ids == mat_id
@@ -75,16 +77,16 @@ def _load_mesh(path: str) -> tuple[Meshes, mx.array | None, mx.array | None, mx.
                 verts_colors = verts_colors.at[data.faces[:, k]].add(colors)
                 counts = counts.at[data.faces[:, k]].add(mx.ones((data.faces.shape[0], 1)))
             verts_colors = verts_colors / mx.maximum(counts, 1.0)
-        return mesh, verts_colors, data.uvs, data.faces
+        return mesh, verts_colors, data.uvs, data.faces, data.texture_image
     if ext == ".obj":
         data = load_obj(path)
         mesh = Meshes([data.verts], [data.faces])
-        return mesh, data.verts_colors, data.texcoords, data.faces_texcoords_idx
+        return mesh, data.verts_colors, data.texcoords, data.faces_texcoords_idx, data.texture_image
     if ext == ".ply":
         data = load_ply(path)
         if data.faces is None:
             raise ValueError("PLY mesh rendering requires face indices.")
-        return Meshes([data.verts], [data.faces]), data.colors, None, None
+        return Meshes([data.verts], [data.faces]), data.colors, None, None, None
     raise ValueError(f"Unsupported mesh input extension: {ext}")
 
 
@@ -109,12 +111,13 @@ def _render_gaussian(args: argparse.Namespace) -> mx.array:
 
 
 def _render_mesh(args: argparse.Namespace) -> mx.array:
-    mesh, colors, uvs, face_uvs = _load_mesh(args.input)
+    mesh, colors, uvs, face_uvs, texture = _load_mesh(args.input)
     cam = _camera(args)
     out = render_mesh(
         cam,
         mesh,
         verts_colors=colors,
+        texture=texture,
         verts_uvs=uvs,
         faces_uvs=face_uvs,
         background=tuple(args.background),

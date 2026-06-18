@@ -12,6 +12,8 @@ Release branch in progress.
   available from render APIs and Gaussian Splatting training.
 - glTF scene loading across default-scene nodes and triangle primitives,
   including node transforms, UVs, material IDs, and PBR base-color summaries.
+- glTF base-color texture loading for embedded/data-URI and external image
+  assets, wired into `mlx3d-render` for textured mesh previews.
 - glTF export of UV coordinates and a simple PBR base color material.
 - `mlx3d-render` CLI for rendering Gaussian checkpoints and mesh assets to
   RGB, depth, or normal images.

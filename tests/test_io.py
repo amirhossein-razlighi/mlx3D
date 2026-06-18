@@ -1,4 +1,5 @@
 import base64
+import io
 import json
 
 import mlx.core as mx
@@ -50,6 +51,12 @@ def test_gltf_roundtrip_uvs_and_material(tmp_path):
     assert g.materials[0].base_color == (0.2, 0.4, 0.6, 1.0)
 
 
+def _png_data_uri(rgb: np.ndarray) -> str:
+    buf = io.BytesIO()
+    Image.fromarray(rgb.astype(np.uint8)).save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
 def _pack_gltf_buffer(arrays):
     blob = b""
     views = []
@@ -76,6 +83,60 @@ def _pack_gltf_buffer(arrays):
             }
         )
     return blob, views, accessors
+
+
+def test_gltf_loads_embedded_base_color_texture(tmp_path):
+    pos = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+    uv = np.array([[0, 0], [1, 0], [0, 1]], dtype=np.float32)
+    idx = np.array([0, 1, 2], dtype=np.uint16)
+    blob, views, accessors = _pack_gltf_buffer(
+        [
+            (pos, 5126, "VEC3", 34962),
+            (uv, 5126, "VEC2", 34962),
+            (idx, 5123, "SCALAR", 34963),
+        ]
+    )
+    tex = np.array([[[255, 0, 0], [0, 255, 0]]], dtype=np.uint8)
+    gltf = {
+        "asset": {"version": "2.0"},
+        "scene": 0,
+        "scenes": [{"nodes": [0]}],
+        "nodes": [{"mesh": 0}],
+        "meshes": [
+            {
+                "primitives": [
+                    {
+                        "attributes": {"POSITION": 0, "TEXCOORD_0": 1},
+                        "indices": 2,
+                        "material": 0,
+                    }
+                ]
+            }
+        ],
+        "materials": [{"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}],
+        "textures": [{"source": 0}],
+        "images": [{"uri": _png_data_uri(tex)}],
+        "buffers": [
+            {
+                "byteLength": len(blob),
+                "uri": "data:application/octet-stream;base64,"
+                + base64.b64encode(blob).decode("ascii"),
+            }
+        ],
+        "bufferViews": views,
+        "accessors": accessors,
+    }
+    path = tmp_path / "textured.gltf"
+    path.write_text(json.dumps(gltf))
+
+    g = load_gltf(str(path))
+
+    assert g.texture_image is not None
+    assert g.texture_image.shape == (1, 2, 3)
+    np.testing.assert_allclose(np.array(g.texture_image), tex.astype(np.float32) / 255.0)
+    assert g.materials is not None
+    assert g.materials[0].base_color_texture == 0
+    assert_close(g.uvs, uv)
 
 
 def test_gltf_loads_scene_nodes_primitives_transforms_and_material_ids(tmp_path):
