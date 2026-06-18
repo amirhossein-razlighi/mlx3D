@@ -106,7 +106,7 @@ Contributions are welcome — file an issue to get started.
 - [x] Optimizer-state-preserving densification for 3DGS
 - [x] Configurable 3DGS training method with vanilla default and MCMC-style fixed-budget relocation
 - [x] 2DGS / surfel-style Gaussian mode with local-normal thickness constraints
-- [ ] 2DGS geometry losses and surface extraction refinements
+- [x] 2DGS geometry losses and surfel surface extraction helpers
 - [x] Mip-Splatting-style anti-aliasing / opacity compensation
 - [ ] Additional well-known splatting recipes (compression, 3DGUT-style variants)
 - [x] Viewer depth-map mode for Gaussian checkpoints

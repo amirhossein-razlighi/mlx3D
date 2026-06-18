@@ -169,6 +169,12 @@ Both terms reuse the differentiable feature rasterizer, so they keep gradients
 on the Metal-backed splatting path. `--geometry-min-alpha` controls which
 pixels are included in those auxiliary losses.
 
+For mesh extraction from a surfel-style checkpoint, use
+`GaussianModel.extract_surface_mesh(...)`. It filters Gaussians by opacity,
+ranks capped samples by surfel footprint, uses each Gaussian's local normal
+axis as the oriented point normal, and feeds those surfels to the Poisson
+reconstruction utility.
+
 Periodic saves render a deterministic held training view and report PSNR.
 Set `--eval-views N` to average that save-time PSNR over `N` evenly spaced
 training views while still saving the first rendered image. The default is one
@@ -190,7 +196,7 @@ NeRF-synthetic scenes and `--antialias` to score the anti-aliased render path.
     relocation is available with `--method mcmc`; surfel-style 2DGS is
     available with `--method 2dgs`. The 2DGS depth-variance and normal-depth
     consistency losses are explicit opt-ins rather than hidden changes to the
-    default path; surface extraction refinements remain experimental.
+    default path.
 
 ## Low-memory training (8-16 GB Macs)
 

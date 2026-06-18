@@ -18,6 +18,7 @@ from mlx3d.splatting import (
     rgb_to_sh,
     sh_to_rgb,
 )
+from mlx3d.structures import Meshes
 from mlx3d.transforms import quaternion_to_matrix
 
 
@@ -431,6 +432,62 @@ def test_model_2dgs_constraints_clamp_local_normal_scale():
     scales = np.array(mx.exp(model.params["scales"]))
     assert np.all(scales[:, 2] <= 0.010001)
     np.testing.assert_allclose(scales[:, :2], 0.5, atol=1e-6)
+
+
+def test_model_surfel_points_filters_caps_and_orients_normals():
+    pts = mx.stack([mx.array([float(i), 0.0, 0.0]) for i in range(5)], axis=0)
+    model = GaussianModel.from_points(pts, sh_degree=0)
+    model.params["opacities"] = mx.array([-8.0, 2.0, 1.0, 4.0, -9.0])
+    model.params["scales"] = mx.log(
+        mx.array(
+            [
+                [10.0, 10.0, 0.01],
+                [0.1, 0.1, 0.01],
+                [3.0, 3.0, 0.01],
+                [1.0, 4.0, 0.01],
+                [20.0, 20.0, 0.01],
+            ]
+        )
+    )
+
+    surfels, normals = model.surfel_points(
+        min_opacity=0.01,
+        max_points=2,
+        orient_towards=(0.0, 0.0, -1.0),
+    )
+
+    np.testing.assert_allclose(np.array(surfels[:, 0]), [2.0, 3.0], atol=1e-6)
+    np.testing.assert_allclose(np.array(normals), [[0.0, 0.0, -1.0]] * 2, atol=1e-6)
+    with pytest.raises(ValueError, match="max_points"):
+        model.surfel_points(max_points=0)
+
+
+def test_model_extract_surface_mesh_uses_selected_surfels(monkeypatch):
+    pts = mx.random.normal((6, 3)) * 0.1
+    model = GaussianModel.from_points(pts, sh_degree=0)
+    captured = {}
+
+    def fake_reconstruct(points, normals, resolution, padding):
+        captured["points"] = points
+        captured["normals"] = normals
+        captured["resolution"] = resolution
+        captured["padding"] = padding
+        faces = mx.array([[0, 1, 2]], dtype=mx.int32)
+        return Meshes([points[:3]], [faces])
+
+    import mlx3d.ops as ops
+
+    monkeypatch.setattr(ops, "poisson_reconstruction", fake_reconstruct)
+
+    mesh = model.extract_surface_mesh(resolution=12, padding=0.2, max_points=4)
+
+    assert isinstance(mesh, Meshes)
+    assert captured["points"].shape == (4, 3)
+    assert captured["normals"].shape == (4, 3)
+    assert captured["resolution"] == 12
+    assert captured["padding"] == 0.2
+    with pytest.raises(ValueError, match="resolution"):
+        model.extract_surface_mesh(resolution=1)
 
 
 def test_model_ply_roundtrip(tmp_path):
