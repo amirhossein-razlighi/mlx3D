@@ -4,6 +4,9 @@ Train a NeRF on the Blender synthetic scenes, natively on your Mac's GPU.
 Full script:
 [`examples/train_nerf.py`](https://github.com/amirhossein-razlighi/mlx3D/blob/main/examples/train_nerf.py).
 
+<p align="center"><img src="../../assets/v020_lego_ngp.png" width="58%" /></p>
+<p align="center"><em>Lego scene rendered from the MLX3D hash-grid NeRF example output.</em></p>
+
 ## Background
 
 A NeRF represents a scene as a function \( (x, d) \mapsto (\sigma, c) \):

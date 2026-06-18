@@ -5,6 +5,9 @@ NeRF-style fields. It follows the Instant-NGP idea: each level stores a small
 hashed feature table, samples eight grid corners, trilinearly interpolates the
 features, and concatenates levels.
 
+<p align="center"><img src="../../assets/v020_lego_ngp.png" width="58%" /></p>
+<p align="center"><em>Lego scene rendered from the MLX3D hash-grid NeRF example output.</em></p>
+
 ```python
 import mlx.core as mx
 import mlx.nn as nn
