@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
+import mlx3d.cli.render as render_cli
 from mlx3d.cli.render import main
 from mlx3d.io import load_image, save_gltf
 from mlx3d.splatting import GaussianModel
@@ -67,7 +68,7 @@ def test_render_cli_renders_gltf_mesh_depth(tmp_path):
     assert img.max() > 0.0
 
 
-def _textured_gltf(path):
+def _textured_gltf(path, material=None):
     pos = np.array([[-1, -1, 0], [1, -1, 0], [1, 1, 0], [-1, 1, 0]], dtype=np.float32)
     uv = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=np.float32)
     idx = np.array([0, 1, 2, 0, 2, 3], dtype=np.uint16)
@@ -100,6 +101,8 @@ def _textured_gltf(path):
     )
     img_buf = io.BytesIO()
     Image.fromarray(tex).save(img_buf, format="PNG")
+    if material is None:
+        material = {"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}
     gltf = {
         "asset": {"version": "2.0"},
         "scene": 0,
@@ -116,7 +119,7 @@ def _textured_gltf(path):
                 ]
             }
         ],
-        "materials": [{"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}],
+        "materials": [material],
         "textures": [{"source": 0}],
         "images": [
             {"uri": "data:image/png;base64," + base64.b64encode(img_buf.getvalue()).decode("ascii")}
@@ -166,6 +169,68 @@ def test_render_cli_uses_gltf_base_color_texture(tmp_path):
     visible = img[img.sum(axis=-1) > 0.05]
     assert visible.shape[0] > 0
     assert visible.std(axis=0).max() > 0.1
+
+
+def test_render_cli_forwards_gltf_pbr_factors(tmp_path, monkeypatch):
+    mesh_path = tmp_path / "textured.gltf"
+    out = tmp_path / "pbr.png"
+    _textured_gltf(
+        mesh_path,
+        {
+            "pbrMetallicRoughness": {
+                "baseColorTexture": {"index": 0},
+                "metallicFactor": 0.65,
+                "roughnessFactor": 0.2,
+            }
+        },
+    )
+    captured = {}
+
+    def fake_render_mesh(camera, mesh, **kwargs):
+        captured.update(kwargs)
+        return {"image": mx.ones((camera.height, camera.width, 3), dtype=mx.float32)}
+
+    monkeypatch.setattr(render_cli, "render_mesh", fake_render_mesh)
+
+    main(
+        [
+            str(mesh_path),
+            "--type",
+            "mesh",
+            "--out",
+            str(out),
+            "--width",
+            "16",
+            "--height",
+            "16",
+            "--shading",
+            "pbr",
+        ]
+    )
+
+    assert captured["shading"] == "pbr"
+    assert captured["metallic"] == 0.65
+    assert captured["roughness"] == 0.2
+    assert captured["texture"] is not None
+
+
+def test_render_cli_rejects_ambiguous_shading_flags(tmp_path):
+    mesh_path = tmp_path / "textured.gltf"
+    _textured_gltf(mesh_path)
+
+    with pytest.raises(SystemExit):
+        main(
+            [
+                str(mesh_path),
+                "--type",
+                "mesh",
+                "--out",
+                str(tmp_path / "x.png"),
+                "--unlit",
+                "--shading",
+                "pbr",
+            ]
+        )
 
 
 def test_render_cli_validates_dimensions(tmp_path):
