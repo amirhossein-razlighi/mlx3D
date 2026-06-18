@@ -167,6 +167,17 @@ Set `--eval-views N` to average that save-time PSNR over `N` evenly spaced
 training views while still saving the first rendered image. The default is one
 view to keep periodic saves cheap.
 
+For a standalone evaluation pass after training:
+
+```bash
+mlx3d-eval outputs/gs/point_cloud.ply --data /path/to/scene \
+    --format colmap --views 20 --json-out metrics.json
+```
+
+The command renders evenly spaced views and reports mean PSNR, SSIM, and L1
+alongside per-view metrics. Use `--format blender --split test` for
+NeRF-synthetic scenes and `--antialias` to score the anti-aliased render path.
+
 !!! note "Method variants"
     The default trainer remains vanilla 3DGS. MCMC-style fixed-budget
     relocation is available with `--method mcmc`; surfel-style 2DGS is

@@ -55,6 +55,7 @@ For checkpoints and mesh assets, render from the shell:
 ```bash
 mlx3d-render point_cloud.ply --out render.png --antialias
 mlx3d-render mesh.glb --type mesh --mode depth --out depth.png
+mlx3d-eval point_cloud.ply --data scene/ --format colmap --views 20
 ```
 
 Continue with the [Quickstart](quickstart.md), then pick a tutorial:
