@@ -36,6 +36,8 @@ class TrainerConfig:
     lr_sh_dc: float = 2.5e-3
     lr_sh_rest: float = 2.5e-3 / 20.0
     lambda_dssim: float = 0.2
+    antialias: bool = False
+    """Use Mip-Splatting-style opacity compensation for projection blur."""
     # Adaptive density control.
     densify_from: int = 500
     densify_until: int = 15000
@@ -176,8 +178,15 @@ class GaussianTrainer:
     ):
         """Photometric loss; ``means2d_probe`` (zeros) exposes screen-space
         positional gradients for densification."""
-        proj = project_gaussians(camera, params["means"], params["quats"], mx.exp(params["scales"]))
+        proj = project_gaussians(
+            camera,
+            params["means"],
+            params["quats"],
+            mx.exp(params["scales"]),
+            antialias=self.config.antialias,
+        )
         means2d = proj["means2d"] + means2d_probe
+        opacities = mx.sigmoid(params["opacities"]) * proj["compensation"]
 
         sh = mx.concatenate([params["sh_dc"], params["sh_rest"]], axis=1)
         dirs = params["means"] - camera.camera_center
@@ -195,7 +204,7 @@ class GaussianTrainer:
             means2d,
             proj["conics"],
             colors,
-            mx.sigmoid(params["opacities"]),
+            opacities,
             sorted_ids,
             tile_ranges,
             camera.width,

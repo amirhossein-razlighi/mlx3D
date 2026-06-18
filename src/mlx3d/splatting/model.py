@@ -141,7 +141,12 @@ class GaussianModel:
         self.params["scales"] = mx.concatenate([constrained[:, :2], z], axis=1)
 
     # ------------------------------------------------------------------ render
-    def render(self, camera: Camera, background: mx.array | None = None) -> dict:
+    def render(
+        self,
+        camera: Camera,
+        background: mx.array | None = None,
+        antialias: bool = False,
+    ) -> dict:
         return render_gaussians(
             camera,
             self.params["means"],
@@ -151,15 +156,17 @@ class GaussianModel:
             sh=self.sh,
             sh_degree=self.active_sh_degree,
             background=background,
+            antialias=antialias,
         )
 
-    def render_depth(self, camera: Camera) -> dict:
+    def render_depth(self, camera: Camera, antialias: bool = False) -> dict:
         return render_gaussian_depth(
             camera,
             self.params["means"],
             self.params["quats"],
             self.scales_act,
             self.opacities_act,
+            antialias=antialias,
         )
 
     def render_features(
@@ -168,6 +175,7 @@ class GaussianModel:
         features: mx.array,
         background: mx.array | None = None,
         normalize: bool = False,
+        antialias: bool = False,
     ) -> dict:
         """Render arbitrary per-Gaussian feature channels from this model."""
         return render_gaussian_features(
@@ -179,6 +187,7 @@ class GaussianModel:
             features,
             background=background,
             normalize=normalize,
+            antialias=antialias,
         )
 
     def one_up_sh_degree(self) -> None:

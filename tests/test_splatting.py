@@ -121,6 +121,37 @@ def test_projection_matches_matrix_formula():
     assert_close(out["conics"], conics, atol=1e-4)
     assert_close(out["depths"], z, atol=1e-5)
     assert_close(out["radii"], radii, atol=0)
+    assert_close(out["compensation"], mx.ones_like(out["compensation"]), atol=0)
+
+
+def test_projection_antialias_compensation_matches_isotropic_formula():
+    cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), width=64, height=64, fov=60.0)
+    scales = mx.array([[0.001, 0.001, 0.001], [0.1, 0.1, 0.1]])
+    out = project_gaussians(
+        cam,
+        mx.zeros((2, 3)),
+        mx.array([[1.0, 0, 0, 0], [1.0, 0, 0, 0]]),
+        scales,
+        antialias=True,
+    )
+
+    var = (cam.fx * scales[:, 0] / 3.0) ** 2
+    expected = var / (var + 0.3)
+    assert_close(out["compensation"], expected, atol=1e-5)
+    comp = np.array(out["compensation"])
+    assert (comp >= 0.0).all()
+    assert (comp <= 1.0).all()
+    assert comp[0] < comp[1]
+
+    no_blur = project_gaussians(
+        cam,
+        mx.zeros((1, 3)),
+        mx.array([[1.0, 0, 0, 0]]),
+        mx.array([[0.001, 0.001, 0.001]]),
+        blur=0.0,
+        antialias=True,
+    )
+    assert_close(no_blur["compensation"], mx.ones((1,)), atol=0)
 
 
 def test_binning_covers_visible_gaussians(random_scene):
@@ -166,6 +197,43 @@ def test_kernel_matches_reference_forward_refined_tiles(random_scene):
     out_r = render_gaussians_reference(cam, means, quats, scales, opac, colors, background=bg)
     assert_close(out_k["image"], out_r["image"], atol=1e-3)
     assert_close(out_k["alpha"], out_r["alpha"], atol=1e-3)
+
+
+def test_antialiased_render_matches_reference_and_reduces_alpha(random_scene):
+    cam, means, quats, scales, opac, colors = random_scene
+    bg = mx.array([0.1, 0.2, 0.3])
+    # Keep opacity low enough that the early-transmittance cutoff does not make
+    # monotonicity ambiguous by skipping different tail splats.
+    opac = opac * 0.1
+    out_plain = render_gaussians(cam, means, quats, scales, opac, colors=colors, background=bg)
+    out_k = render_gaussians(
+        cam,
+        means,
+        quats,
+        scales,
+        opac,
+        colors=colors,
+        background=bg,
+        antialias=True,
+    )
+    out_r = render_gaussians_reference(
+        cam,
+        means,
+        quats,
+        scales,
+        opac,
+        colors,
+        background=bg,
+        antialias=True,
+    )
+
+    assert_close(out_k["image"], out_r["image"], atol=1e-3)
+    assert_close(out_k["alpha"], out_r["alpha"], atol=1e-3)
+    assert float((out_k["alpha"] - out_plain["alpha"]).max()) <= 1e-6
+    comp = np.array(out_k["compensation"])
+    assert (comp >= 0.0).all()
+    assert (comp <= 1.0).all()
+    assert (comp < 1.0).any()
 
 
 def test_depth_rasterization_outputs_valid_depth(random_scene):

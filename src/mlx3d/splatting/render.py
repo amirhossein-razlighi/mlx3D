@@ -22,6 +22,7 @@ def render_gaussians(
     sh_degree: int = 3,
     background: mx.array | None = None,
     refine_tiles: bool = False,
+    antialias: bool = False,
 ) -> dict[str, mx.array]:
     """Render 3D Gaussians from a camera. Differentiable end to end.
 
@@ -39,6 +40,9 @@ def render_gaussians(
         refine_tiles: experimental conservative ellipse/tile rejection after
             square radius binning. Off by default because its extra MLX work is
             not faster on all scenes.
+        antialias: enable Mip-Splatting-style opacity compensation for the
+            projection blur. This reduces over-bright subpixel splats while
+            preserving the existing 3DGS-compatible behavior by default.
 
     Returns:
         dict with ``image`` (H, W, 3), ``alpha`` (H, W), plus the projection
@@ -48,7 +52,8 @@ def render_gaussians(
     if (colors is None) == (sh is None):
         raise ValueError("Provide exactly one of `colors` or `sh`.")
 
-    proj = project_gaussians(camera, means, quats, scales)
+    proj = project_gaussians(camera, means, quats, scales, antialias=antialias)
+    opacities = opacities * proj["compensation"]
 
     if sh is not None:
         dirs = means - camera.camera_center
@@ -77,7 +82,14 @@ def render_gaussians(
         tiles_y,
         background=background,
     )
-    out.update({"means2d": proj["means2d"], "depths": proj["depths"], "radii": proj["radii"]})
+    out.update(
+        {
+            "means2d": proj["means2d"],
+            "depths": proj["depths"],
+            "radii": proj["radii"],
+            "compensation": proj["compensation"],
+        }
+    )
     return out
 
 
@@ -88,6 +100,7 @@ def render_gaussian_depth(
     scales: mx.array,
     opacities: mx.array,
     refine_tiles: bool = False,
+    antialias: bool = False,
 ) -> dict[str, mx.array]:
     """Render expected depth and alpha from 3D Gaussians.
 
@@ -95,7 +108,8 @@ def render_gaussian_depth(
     tile binning, and alpha compositing math as RGB splatting, but accumulates
     transmittance-weighted depth instead of color.
     """
-    proj = project_gaussians(camera, means, quats, scales)
+    proj = project_gaussians(camera, means, quats, scales, antialias=antialias)
+    opacities = opacities * proj["compensation"]
     sorted_ids, tile_ranges, tiles_x, tiles_y = bin_gaussians(
         proj["means2d"],
         proj["radii"],
@@ -116,7 +130,14 @@ def render_gaussian_depth(
         tiles_x,
         tiles_y,
     )
-    out.update({"means2d": proj["means2d"], "depths": proj["depths"], "radii": proj["radii"]})
+    out.update(
+        {
+            "means2d": proj["means2d"],
+            "depths": proj["depths"],
+            "radii": proj["radii"],
+            "compensation": proj["compensation"],
+        }
+    )
     return out
 
 
@@ -130,6 +151,7 @@ def render_gaussian_features(
     background: mx.array | None = None,
     normalize: bool = False,
     refine_tiles: bool = False,
+    antialias: bool = False,
 ) -> dict[str, mx.array]:
     """Render arbitrary per-Gaussian feature channels.
 
@@ -142,7 +164,8 @@ def render_gaussian_features(
     alpha, matching the expected-depth convention. Leave it ``False`` for
     ordinary alpha compositing with an optional feature-space background.
     """
-    proj = project_gaussians(camera, means, quats, scales)
+    proj = project_gaussians(camera, means, quats, scales, antialias=antialias)
+    opacities = opacities * proj["compensation"]
     sorted_ids, tile_ranges, tiles_x, tiles_y = bin_gaussians(
         proj["means2d"],
         proj["radii"],
@@ -165,5 +188,12 @@ def render_gaussian_features(
         background=background,
         normalize=normalize,
     )
-    out.update({"means2d": proj["means2d"], "depths": proj["depths"], "radii": proj["radii"]})
+    out.update(
+        {
+            "means2d": proj["means2d"],
+            "depths": proj["depths"],
+            "radii": proj["radii"],
+            "compensation": proj["compensation"],
+        }
+    )
     return out
