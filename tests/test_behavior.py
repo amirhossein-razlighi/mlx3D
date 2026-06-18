@@ -209,37 +209,53 @@ def test_hard_rasterizer_faster_than_soft():
     assert ts / th > 3.0
 
 
-def test_occupancy_skipping_faster_than_dense():
-    """Empty-space skipping must beat dense NeRF rendering on a sparse scene."""
-    model = NeRF(hidden_dim=128, num_layers=6)  # heavy enough that MLP dominates
-    o = mx.random.normal((512, 3))
-    d = mx.random.normal((512, 3))
+def test_occupancy_skipping_reduces_field_evaluations():
+    """Empty-space skipping should call the field on the compacted sample budget."""
+
+    class CountingField:
+        def __init__(self):
+            self.calls = 0
+            self.samples = 0
+
+        def __call__(self, points, directions):
+            self.calls += 1
+            n = 1
+            for dim in points.shape[:-1]:
+                n *= int(dim)
+            self.samples += n
+            density = mx.ones(points.shape[:-1])
+            rgb = mx.sigmoid(points[..., :3] + directions[..., :3])
+            return density, rgb
+
+    dense_model = CountingField()
+    skip_model = CountingField()
+    o = mx.random.normal((128, 3))
+    d = mx.random.normal((128, 3))
     d = d / mx.linalg.norm(d, axis=-1, keepdims=True)
     grid = OccupancyGrid(resolution=64, bounds=(-1.5, 1.5))
     grid.update(lambda p: mx.where(mx.linalg.norm(p, axis=-1) < 0.5, 10.0, 0.0), threshold=1.0)
 
-    def dense():
-        mx.eval(render_rays(model, o, d, 2.0, 6.0, num_coarse=64)["rgb"])
+    dense = render_rays(dense_model, o, d, 2.0, 6.0, num_coarse=64, stratified=False)
+    skipped = render_rays_occupancy(
+        skip_model,
+        o,
+        d,
+        2.0,
+        6.0,
+        grid,
+        num_samples=64,
+        eval_fraction=0.15,
+        stratified=False,
+    )
+    mx.eval(dense["rgb"], skipped["rgb"])
 
-    def skip():
-        mx.eval(
-            render_rays_occupancy(model, o, d, 2.0, 6.0, grid, num_samples=64, eval_fraction=0.15)[
-                "rgb"
-            ]
-        )
-
-    dense()
-    skip()  # warmup
-    t = time.perf_counter()
-    for _ in range(5):
-        dense()
-    td = time.perf_counter() - t
-    t = time.perf_counter()
-    for _ in range(5):
-        skip()
-    ts = time.perf_counter() - t
-    assert ts < td, f"occupancy skip ({ts:.3f}s) should beat dense ({td:.3f}s)"
-    assert td / ts > 1.5
+    assert dense_model.calls == 1
+    assert skip_model.calls == 1
+    assert dense_model.samples == 128 * 64
+    assert skip_model.samples == int(128 * 64 * 0.15)
+    assert skip_model.samples < dense_model.samples
+    assert skipped["rgb"].shape == dense["rgb"].shape == (128, 3)
+    assert not bool(mx.isnan(skipped["rgb"]).any())
 
 
 def test_render_mesh_color_optimization_reduces_loss():

@@ -59,6 +59,36 @@ Shading is **two-sided** by default: each normal is oriented toward the camera
 before lighting, so meshes with inward or inconsistent winding (very common in
 the wild) still light correctly instead of rendering black.
 
+## PBR-style materials
+
+Use `shading="pbr"` for a compact Cook-Torrance/GGX material preview with
+base color, roughness, and metallic controls:
+
+```python
+out = render_mesh(
+    camera, mesh,
+    verts_colors=mx.full((mesh.verts_packed().shape[0], 3), mx.array([0.8, 0.25, 0.1])),
+    lights=[PointLights(location=(3, 3, -2)), AmbientLights(color=(0.04, 0.04, 0.04))],
+    shading="pbr",
+    roughness=0.35,
+    metallic=0.2,
+)
+```
+
+This is not a full environment-lit offline renderer; it is a fast, differentiable
+material model for inspecting glTF-style assets and optimizing material
+parameters inside MLX.
+
+In 0.2.0, `mlx3d-render` can load textured glTF/GLB meshes and forward uniform
+glTF metallic/roughness factors into this PBR shader:
+
+```bash
+mlx3d-render model.glb --type mesh --out preview.png --shading pbr --ssaa 2
+```
+
+For asset-heavy workflows, this gives a quick local preview before you move to
+a full DCC tool or game engine.
+
 ## Antialiasing and render passes
 
 Pass `ssaa=N` to supersample (render at `N x` resolution and box-downsample) for

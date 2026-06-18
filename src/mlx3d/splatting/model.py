@@ -5,7 +5,9 @@ import numpy as np
 
 from ..cameras import Camera
 from ..io import load_ply, save_ply
-from .render import render_gaussian_depth, render_gaussians
+from ..structures import Meshes
+from ..transforms import quaternion_to_matrix
+from .render import render_gaussian_depth, render_gaussian_features, render_gaussians
 from .sh import num_sh_bases, rgb_to_sh
 
 __all__ = ["GaussianModel"]
@@ -141,7 +143,13 @@ class GaussianModel:
         self.params["scales"] = mx.concatenate([constrained[:, :2], z], axis=1)
 
     # ------------------------------------------------------------------ render
-    def render(self, camera: Camera, background: mx.array | None = None) -> dict:
+    def render(
+        self,
+        camera: Camera,
+        background: mx.array | None = None,
+        antialias: bool = False,
+        projection: str = "ewa",
+    ) -> dict:
         return render_gaussians(
             camera,
             self.params["means"],
@@ -151,20 +159,180 @@ class GaussianModel:
             sh=self.sh,
             sh_degree=self.active_sh_degree,
             background=background,
+            antialias=antialias,
+            projection=projection,
         )
 
-    def render_depth(self, camera: Camera) -> dict:
+    def render_depth(
+        self,
+        camera: Camera,
+        antialias: bool = False,
+        projection: str = "ewa",
+    ) -> dict:
         return render_gaussian_depth(
             camera,
             self.params["means"],
             self.params["quats"],
             self.scales_act,
             self.opacities_act,
+            antialias=antialias,
+            projection=projection,
+        )
+
+    def render_features(
+        self,
+        camera: Camera,
+        features: mx.array,
+        background: mx.array | None = None,
+        normalize: bool = False,
+        antialias: bool = False,
+        projection: str = "ewa",
+    ) -> dict:
+        """Render arbitrary per-Gaussian feature channels from this model."""
+        return render_gaussian_features(
+            camera,
+            self.params["means"],
+            self.params["quats"],
+            self.scales_act,
+            self.opacities_act,
+            features,
+            background=background,
+            normalize=normalize,
+            antialias=antialias,
+            projection=projection,
         )
 
     def one_up_sh_degree(self) -> None:
         if self.active_sh_degree < self.sh_degree:
             self.active_sh_degree += 1
+
+    # --------------------------------------------------------- surface export
+    def surfel_points(
+        self,
+        min_opacity: float = 0.01,
+        max_points: int | None = None,
+        orient_towards: tuple[float, float, float] | mx.array | None = None,
+    ) -> tuple[mx.array, mx.array]:
+        """Return oriented surfel samples from the Gaussian centers.
+
+        This is intended for 2DGS-style checkpoints, where the local ``z`` axis
+        is the surfel normal and the first two local scales span the disk. Rows
+        are filtered by activated opacity and, when capped, ranked by
+        ``opacity * scale_x * scale_y`` so large opaque surfels survive first.
+        """
+        if max_points is not None and max_points <= 0:
+            raise ValueError("max_points must be positive when provided.")
+        n = self.num_gaussians
+        if n == 0:
+            empty = mx.zeros((0, 3), dtype=mx.float32)
+            return empty, empty
+
+        opacity = np.array(self.opacities_act)
+        scales = np.array(self.scales_act)
+        importance = opacity * scales[:, 0] * scales[:, 1]
+        keep = opacity >= float(min_opacity)
+        if not keep.any():
+            keep[int(np.argmax(importance))] = True
+        keep_idx = np.where(keep)[0]
+        if max_points is not None and keep_idx.size > max_points:
+            local = np.argpartition(-importance[keep_idx], max_points - 1)[:max_points]
+            keep_idx = keep_idx[local]
+        keep_idx = np.sort(keep_idx.astype(np.int32))
+        idx = mx.array(keep_idx)
+
+        points = self.params["means"][idx]
+        normals = quaternion_to_matrix(self.params["quats"][idx])[:, :, 2]
+        normals = normals / mx.maximum(mx.linalg.norm(normals, axis=-1, keepdims=True), 1e-8)
+        if orient_towards is not None:
+            target = mx.array(orient_towards, dtype=points.dtype)
+            flip = mx.sum((target - points) * normals, axis=-1, keepdims=True) < 0
+            normals = mx.where(flip, -normals, normals)
+        return points, normals
+
+    def extract_surface_mesh(
+        self,
+        resolution: int = 64,
+        padding: float = 0.1,
+        min_opacity: float = 0.01,
+        max_points: int | None = 200_000,
+        orient_towards: tuple[float, float, float] | mx.array | None = None,
+    ) -> Meshes:
+        """Reconstruct a mesh from oriented Gaussian surfels via Poisson reconstruction."""
+        if resolution <= 1:
+            raise ValueError("resolution must be greater than 1.")
+        points, normals = self.surfel_points(
+            min_opacity=min_opacity,
+            max_points=max_points,
+            orient_towards=orient_towards,
+        )
+        from ..ops import poisson_reconstruction
+
+        return poisson_reconstruction(points, normals, resolution=resolution, padding=padding)
+
+    # -------------------------------------------------------------- compaction
+    def copy(self) -> "GaussianModel":
+        """Return a detached copy of the Gaussian table."""
+        out = GaussianModel({k: mx.array(v) for k, v in self.params.items()}, self.sh_degree)
+        out.active_sh_degree = self.active_sh_degree
+        return out
+
+    def compact(
+        self,
+        min_opacity: float = 0.0,
+        max_gaussians: int | None = None,
+        target_sh_degree: int | None = None,
+    ) -> "GaussianModel":
+        """Return a smaller checkpoint by pruning low-importance Gaussians.
+
+        Importance is a conservative, view-independent proxy:
+        ``sigmoid(opacity) * max(scale)^2``. This keeps opaque large-footprint
+        splats before transparent/subpixel ones, preserves the original order
+        of retained rows for checkpoint diffability, and does not mutate this
+        model.
+
+        Args:
+            min_opacity: prune Gaussians with activated opacity below this
+                threshold. If the threshold removes every row, the most
+                important Gaussian is kept so the checkpoint remains renderable.
+            max_gaussians: optional hard cap; the highest-importance rows are
+                retained.
+            target_sh_degree: optional lower SH degree for color coefficient
+                truncation. This reduces checkpoint size and render cost for
+                view-dependent color at the expense of angular detail.
+        """
+        if max_gaussians is not None and max_gaussians <= 0:
+            raise ValueError("max_gaussians must be positive when provided.")
+        if target_sh_degree is not None and not (0 <= target_sh_degree <= self.sh_degree):
+            raise ValueError("target_sh_degree must be between 0 and the model sh_degree.")
+
+        n = self.num_gaussians
+        if n == 0:
+            return self.copy()
+
+        opacity = np.array(self.opacities_act)
+        max_scale = np.array(self.scales_act).max(axis=1)
+        importance = opacity * max_scale * max_scale
+        keep = opacity >= float(min_opacity)
+        if not keep.any():
+            keep[int(np.argmax(importance))] = True
+
+        keep_idx = np.where(keep)[0]
+        if max_gaussians is not None and keep_idx.size > max_gaussians:
+            local = np.argpartition(-importance[keep_idx], max_gaussians - 1)[:max_gaussians]
+            keep_idx = keep_idx[local]
+        keep_idx = np.sort(keep_idx.astype(np.int32))
+        idx = mx.array(keep_idx)
+        params = {k: v[idx] for k, v in self.params.items()}
+
+        sh_degree = self.sh_degree
+        if target_sh_degree is not None:
+            sh_degree = int(target_sh_degree)
+            k = num_sh_bases(sh_degree)
+            params["sh_rest"] = params["sh_rest"][:, : max(0, k - 1), :]
+
+        out = GaussianModel(params, sh_degree=sh_degree)
+        out.active_sh_degree = min(self.active_sh_degree, sh_degree)
+        return out
 
     # ------------------------------------------------------------- checkpoints
     def save_ply(self, path: str) -> None:

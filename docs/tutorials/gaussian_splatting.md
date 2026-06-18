@@ -7,6 +7,9 @@ CUDA rasterizer — tile-based forward **and** backward kernels — wrapped in
 Full script:
 [`examples/train_gaussian_splatting.py`](https://github.com/amirhossein-razlighi/mlx3D/blob/main/examples/train_gaussian_splatting.py).
 
+<p align="center"><img src="../../assets/v020_truck_render_hi.png" width="92%" /></p>
+<p align="center"><em>Truck scene rendered from a trained 3DGS checkpoint with the MLX3D Metal rasterizer and anti-aliasing enabled.</em></p>
+
 ## How the renderer works
 
 1. **Projection** (pure MLX, autodiff): each Gaussian's quaternion + scale
@@ -46,6 +49,51 @@ out["image"]   # (720, 1280, 3) — differentiable w.r.t. all inputs
 out["alpha"]   # (720, 1280) accumulated opacity — also differentiable
 ```
 
+For scenes with tiny/high-frequency splats, enable anti-aliasing:
+
+```python
+out = render_gaussians(..., antialias=True)
+```
+
+This keeps the standard screen-space blur but applies the Mip-Splatting-style
+opacity compensation \( \sqrt{\det(\Sigma) / \det(\Sigma + \epsilon I)} \),
+which reduces over-bright subpixel Gaussians without changing the default
+3DGS-compatible rendering path.
+
+The same Metal path can render arbitrary per-Gaussian feature channels in
+chunks of three, reusing the RGB kernel and its backward pass:
+
+```python
+from mlx3d.splatting import render_gaussian_features
+
+features = mx.concatenate(
+    [depths[:, None], normals, semantic_logits], axis=-1
+)  # (N, C)
+
+out = render_gaussian_features(
+    camera,
+    means,
+    quats,
+    scales,
+    opacities,
+    features,
+    normalize=True,  # expected feature = sum(alpha_i T_i f_i) / alpha
+)
+out["features"]  # (720, 1280, C)
+```
+
+Use `normalize=False` with a feature-space `background` when you want ordinary
+alpha compositing instead of expected features.
+
+The packaged render CLI exposes the same paths for checkpoints. These are
+real outputs from the truck checkpoint:
+
+<p align="center">
+  <img src="../../assets/v020_truck_depth_hi.png" width="45%" />
+  <img src="../../assets/v020_truck_normals_hi.png" width="45%" />
+</p>
+<p align="center"><em>Expected depth and rendered Gaussian normal features from the same truck checkpoint.</em></p>
+
 On an M-series GPU, 100k Gaussians render at ~30 FPS at 720p, with a full
 forward+backward training step around 100 ms.
 
@@ -64,6 +112,9 @@ To watch training as it happens, start the live viewer from the same command:
 python examples/train_gaussian_splatting.py --data /path/to/scene \
     --iters 7000 --downscale 4 --viewer
 ```
+
+Pass `--antialias` to train with the same opacity compensation used by
+`render_gaussians(..., antialias=True)`.
 
 The viewer opens a local browser page and polls lightweight metadata while
 requesting rendered JPEG frames only when the view changes. Training publishes a
@@ -123,17 +174,60 @@ axis to a thin disk, controlled by `--2d-thickness` as a fraction of scene
 extent. The output remains a standard 3DGS PLY, so checkpoints still open in
 the built-in viewer and other splat viewers.
 
+2DGS geometry regularization is opt-in. `--2d-depth-variance` penalizes
+per-pixel depth variance along a ray, and `--2d-normal-consistency` aligns
+rendered surfel normals with normals derived from the expected depth map.
+Both terms reuse the differentiable feature rasterizer, so they keep gradients
+on the Metal-backed splatting path. `--geometry-min-alpha` controls which
+pixels are included in those auxiliary losses.
+
+For mesh extraction from a surfel-style checkpoint, use
+`GaussianModel.extract_surface_mesh(...)`. It filters Gaussians by opacity,
+ranks capped samples by surfel footprint, uses each Gaussian's local normal
+axis as the oriented point normal, and feeds those surfels to the Poisson
+reconstruction utility.
+
+For distorted or fisheye cameras, pass `--projection ut` in the training
+script or `projection="ut"` in the render APIs. This uses a 3DGUT-style
+Unscented Transform: six 3D sigma points are projected through the full
+`Camera.project_points` model, then converted back to a 2D Gaussian. It is
+slower than the default analytic EWA projection, but it respects Brown-Conrady,
+fisheye, and orthographic camera projection.
+
+For command-line renders:
+
+```bash
+mlx3d-render outputs/gs_truck/point_cloud.ply \
+    --out truck.png --width 1280 --height 720 --antialias --up 0 -1 0
+mlx3d-render outputs/gs_truck/point_cloud.ply \
+    --mode depth --out truck_depth.png --up 0 -1 0
+mlx3d-render outputs/gs_truck/point_cloud.ply \
+    --mode normal --out truck_normals.png --up 0 -1 0
+```
+
 Periodic saves render a deterministic held training view and report PSNR.
 Set `--eval-views N` to average that save-time PSNR over `N` evenly spaced
 training views while still saving the first rendered image. The default is one
 view to keep periodic saves cheap.
 
+For a standalone evaluation pass after training:
+
+```bash
+mlx3d-eval outputs/gs/point_cloud.ply --data /path/to/scene \
+    --format colmap --views 20 --json-out metrics.json
+```
+
+The command renders evenly spaced views and reports mean PSNR, SSIM, and L1
+alongside per-view metrics. Use `--format blender --split test` for
+NeRF-synthetic scenes and `--antialias` to score the anti-aliased render path.
+
 !!! note "Method variants"
     The default trainer remains vanilla 3DGS. MCMC-style fixed-budget
     relocation is available with `--method mcmc`; surfel-style 2DGS is
-    available with `--method 2dgs`. Full 2DGS geometry losses and surface
-    extraction refinements remain experimental work rather than hidden changes
-    to the default path.
+    available with `--method 2dgs`. The 2DGS depth-variance and normal-depth
+    consistency losses are explicit opt-ins rather than hidden changes to the
+    default path. The default projection remains fast analytic EWA; the
+    distortion-aware UT projection is selected explicitly with `--projection ut`.
 
 ## Low-memory training (8-16 GB Macs)
 
@@ -212,6 +306,30 @@ mlx3d-view outputs/gs/point_cloud.ply
 (`f_dc_*`, `f_rest_*`, `opacity`, `scale_*`, `rot_*`), so checkpoints open
 directly in common viewers (SuperSplat, Polycam viewer, gsplat tools, ...)
 and you can fine-tune checkpoints trained elsewhere.
+
+For smaller deployment checkpoints, compact a trained model before saving:
+
+```python
+compact = model.compact(
+    min_opacity=0.01,
+    max_gaussians=500_000,
+    target_sh_degree=2,
+)
+compact.save_ply("point_cloud_compact.ply")
+```
+
+Or run the packaged CLI:
+
+```bash
+mlx3d-compact outputs/gs/point_cloud.ply \
+    --out outputs/gs/point_cloud_compact.ply \
+    --min-opacity 0.01 --max-gaussians 500000 --sh-degree 2
+```
+
+Compaction ranks Gaussians by a view-independent footprint proxy,
+`opacity * max_scale^2`, preserves retained row order, and can lower the
+spherical-harmonic degree when view-dependent color detail is less important
+than file size and render cost.
 
 !!! note "Current limitations"
     - One camera per `step` call.

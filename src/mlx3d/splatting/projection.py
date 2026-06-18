@@ -11,7 +11,7 @@ import mlx.core as mx
 from ..cameras import Camera
 from ..transforms import quaternion_to_matrix
 
-__all__ = ["quat_scale_to_cov3d", "project_gaussians"]
+__all__ = ["quat_scale_to_cov3d", "project_gaussians", "project_gaussians_ut"]
 
 
 def quat_scale_to_cov3d(quats: mx.array, scales: mx.array) -> mx.array:
@@ -27,6 +27,7 @@ def project_gaussians(
     quats: mx.array,
     scales: mx.array,
     blur: float = 0.3,
+    antialias: bool = False,
 ) -> dict[str, mx.array]:
     """Project 3D Gaussians into screen space.
 
@@ -37,6 +38,11 @@ def project_gaussians(
         scales: (N, 3) per-axis standard deviations.
         blur: screen-space dilation added to the diagonal (0.3 px as in 3DGS,
             which guarantees splats cover at least about one pixel).
+        antialias: if ``True``, also return Mip-Splatting-style opacity
+            compensation for the added screen-space blur. The conic still uses
+            the blurred covariance, while ``compensation`` scales opacity by
+            ``sqrt(det(cov) / det(cov + blur I))`` so subpixel Gaussians do not
+            gain energy from the low-pass filter.
 
     Returns:
         dict with:
@@ -44,6 +50,8 @@ def project_gaussians(
             - ``conics`` (N, 3): upper-triangular inverse 2D covariance (a, b, c).
             - ``depths`` (N,): camera-space z.
             - ``radii`` (N,): conservative pixel radii (0 for culled Gaussians).
+            - ``compensation`` (N,): opacity multiplier for anti-aliased mode,
+              otherwise all ones.
     """
     R, t = camera.R, camera.t
     mx_, my_, mz_ = means[:, 0], means[:, 1], means[:, 2]
@@ -104,13 +112,21 @@ def project_gaussians(
     m11 = (t10 * r01 + t11 * r11 + t12 * r21) * sy
     m12 = (t10 * r02 + t11 * r12 + t12 * r22) * sz
 
-    a = m00 * m00 + m01 * m01 + m02 * m02 + blur
+    a0 = m00 * m00 + m01 * m01 + m02 * m02
     b = m00 * m10 + m01 * m11 + m02 * m12
-    c = m10 * m10 + m11 * m11 + m12 * m12 + blur
+    c0 = m10 * m10 + m11 * m11 + m12 * m12
+
+    a = a0 + blur
+    c = c0 + blur
 
     det = a * c - b * b
     det_safe = mx.maximum(det, 1e-12)
     conics = mx.stack([c / det_safe, -b / det_safe, a / det_safe], axis=-1)
+    if antialias and blur > 0:
+        det0 = mx.maximum(a0 * c0 - b * b, 0.0)
+        compensation = mx.sqrt(det0 / det_safe)
+    else:
+        compensation = mx.ones_like(det)
 
     # Conservative radius: 3 sigma of the larger eigenvalue.
     mid = 0.5 * (a + c)
@@ -119,5 +135,71 @@ def project_gaussians(
 
     valid = (z > camera.znear) & (det > 0)
     radii = mx.where(valid, radii, mx.zeros_like(radii))
+    compensation = mx.where(valid, compensation, mx.zeros_like(compensation))
 
-    return {"means2d": means2d, "conics": conics, "depths": z, "radii": radii}
+    return {
+        "means2d": means2d,
+        "conics": conics,
+        "depths": z,
+        "radii": radii,
+        "compensation": compensation,
+    }
+
+
+def project_gaussians_ut(
+    camera: Camera,
+    means: mx.array,
+    quats: mx.array,
+    scales: mx.array,
+    blur: float = 0.3,
+    antialias: bool = False,
+) -> dict[str, mx.array]:
+    """Project Gaussians with a 3D Unscented Transform.
+
+    This 3DGUT-style projection sends six cubature sigma points through the
+    camera's actual :meth:`~mlx3d.cameras.Camera.project_points` method, so
+    Brown-Conrady distortion, fisheye distortion, and orthographic cameras are
+    handled by the same camera model used elsewhere in the library. It is more
+    expensive than the analytic EWA projection and is therefore opt-in.
+    """
+    r = quaternion_to_matrix(quats)
+    sqrt_cov = r * scales[:, None, :]
+    offsets = mx.concatenate([sqrt_cov.swapaxes(1, 2), -sqrt_cov.swapaxes(1, 2)], axis=1)
+    sigma = means[:, None, :] + mx.sqrt(mx.array(3.0, dtype=means.dtype)) * offsets
+
+    xy, _ = camera.project_points(sigma.reshape(-1, 3))
+    xy = xy.reshape(means.shape[0], 6, 2)
+    means2d = xy.mean(axis=1)
+    d = xy - means2d[:, None, :]
+    a0 = mx.mean(d[..., 0] * d[..., 0], axis=1)
+    b = mx.mean(d[..., 0] * d[..., 1], axis=1)
+    c0 = mx.mean(d[..., 1] * d[..., 1], axis=1)
+
+    a = a0 + blur
+    c = c0 + blur
+    det = a * c - b * b
+    det_safe = mx.maximum(det, 1e-12)
+    conics = mx.stack([c / det_safe, -b / det_safe, a / det_safe], axis=-1)
+    if antialias and blur > 0:
+        det0 = mx.maximum(a0 * c0 - b * b, 0.0)
+        compensation = mx.sqrt(det0 / det_safe)
+    else:
+        compensation = mx.ones_like(det)
+
+    mid = 0.5 * (a + c)
+    lam1 = mid + mx.sqrt(mx.maximum(mid * mid - det, 0.01))
+    radii = mx.ceil(3.0 * mx.sqrt(mx.maximum(lam1, 0.0)))
+
+    center_cam = camera.world_to_camera(means)
+    z = center_cam[:, 2]
+    valid = (z > camera.znear) & (det > 0)
+    radii = mx.where(valid, radii, mx.zeros_like(radii))
+    compensation = mx.where(valid, compensation, mx.zeros_like(compensation))
+
+    return {
+        "means2d": means2d,
+        "conics": conics,
+        "depths": z,
+        "radii": radii,
+        "compensation": compensation,
+    }

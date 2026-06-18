@@ -17,7 +17,7 @@ MLX3D brings the PyTorch3D workflow to Macs: batched 3D data structures, cameras
 - **Ops & losses** — GPU brute-force k-NN, chamfer distance, area-weighted surface sampling, Laplacian/edge/normal-consistency mesh losses, PSNR and differentiable SSIM.
 - **NeRF** — positional encoding, the NeRF MLP, stratified + hierarchical sampling, volume rendering, Blender-synthetic dataset loader.
 - **Mesh rendering** — differentiable soft triangle rasterization, UV texture sampling for OBJ/MTL assets, and scalar-field mesh extraction.
-- **Gaussian Splatting** — a Metal translation of the reference CUDA rasterizer (tile-based forward & backward kernels wrapped in `mx.custom_function`), EWA projection, spherical harmonics, adaptive density control, COLMAP loading, and standard 3DGS `.ply` checkpoints. ~30 FPS forward at 720p with 100k Gaussians on an M-series GPU.
+- **Gaussian Splatting** — a Metal translation of the reference CUDA rasterizer (tile-based forward & backward kernels wrapped in `mx.custom_function`), EWA projection, spherical harmonics, anti-aliased and arbitrary feature rendering, adaptive density control, COLMAP loading, and standard 3DGS `.ply` checkpoints. ~30 FPS forward at 720p with 100k Gaussians on an M-series GPU.
 - **Interactive viewer** — `mlx3d-view point_cloud.ply` opens a browser viewer with orbit/pan/zoom; frames are rendered on the Apple GPU by the Metal rasterizer and streamed live. Works for NeRFs too.
 - **IO** — OBJ and PLY (ascii + binary, including Gaussian Splatting checkpoint layouts), plus one-line image `save_image` / `load_image` for any renderer output.
 - **Composable & extensible** — every image renderer is a plain callable `(camera, scene) -> {"image", "alpha", "depth"}` (the [`Renderer`](src/mlx3d/renderer/protocols.py) protocol), so you can drop in your own rasterizer, shader, or ray tracer and reuse the rest of the pipeline — no base classes to subclass.
@@ -51,6 +51,9 @@ Train Gaussian Splatting on any COLMAP scene (same inputs as the original 3DGS):
 ```bash
 python examples/train_gaussian_splatting.py --data /path/to/scene --iters 7000
 mlx3d-view outputs/gs/point_cloud.ply   # inspect the result interactively
+mlx3d-render outputs/gs/point_cloud.ply --out render.png --antialias
+mlx3d-eval outputs/gs/point_cloud.ply --data /path/to/scene --views 20 --json-out metrics.json
+mlx3d-compact outputs/gs/point_cloud.ply --out point_cloud_small.ply --max-gaussians 500000
 ```
 
 More in the docs: [mesh optimization](https://amirhossein-razlighi.github.io/mlx3D/tutorials/mesh_optimization/), [point cloud fitting](https://amirhossein-razlighi.github.io/mlx3D/tutorials/pointcloud_fitting/), [NeRF](https://amirhossein-razlighi.github.io/mlx3D/tutorials/nerf/), [Gaussian Splatting](https://amirhossein-razlighi.github.io/mlx3D/tutorials/gaussian_splatting/).
@@ -103,8 +106,9 @@ Contributions are welcome — file an issue to get started.
 - [x] Optimizer-state-preserving densification for 3DGS
 - [x] Configurable 3DGS training method with vanilla default and MCMC-style fixed-budget relocation
 - [x] 2DGS / surfel-style Gaussian mode with local-normal thickness constraints
-- [ ] 2DGS geometry losses and surface extraction refinements
-- [ ] Additional well-known splatting recipes (anti-aliasing, compression, 3DGUT-style variants)
+- [x] 2DGS geometry losses and surfel surface extraction helpers
+- [x] Mip-Splatting-style anti-aliasing / opacity compensation
+- [x] Additional well-known splatting recipes (compression, 3DGUT-style variants)
 - [x] Viewer depth-map mode for Gaussian checkpoints
 - [x] Viewer mesh-style inspection with GPU-efficient depth contours
 - [x] Marching cubes / mesh extraction
