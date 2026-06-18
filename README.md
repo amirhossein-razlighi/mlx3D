@@ -108,7 +108,7 @@ Contributions are welcome — file an issue to get started.
 - [x] 2DGS / surfel-style Gaussian mode with local-normal thickness constraints
 - [x] 2DGS geometry losses and surfel surface extraction helpers
 - [x] Mip-Splatting-style anti-aliasing / opacity compensation
-- [ ] Additional well-known splatting recipes (compression, 3DGUT-style variants)
+- [x] Additional well-known splatting recipes (compression, 3DGUT-style variants)
 - [x] Viewer depth-map mode for Gaussian checkpoints
 - [x] Viewer mesh-style inspection with GPU-efficient depth contours
 - [x] Marching cubes / mesh extraction

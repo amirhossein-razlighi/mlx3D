@@ -167,6 +167,12 @@ def main() -> None:
         help="enable Mip-Splatting-style opacity compensation for projection blur",
     )
     parser.add_argument(
+        "--projection",
+        choices=["ewa", "ut"],
+        default="ewa",
+        help="Gaussian projection: fast analytic EWA or 3DGUT-style Unscented Transform",
+    )
+    parser.add_argument(
         "--densify-from",
         type=int,
         default=500,
@@ -373,6 +379,7 @@ def main() -> None:
     config = TrainerConfig(
         method=args.method,
         antialias=args.antialias,
+        projection=args.projection,
         white_background=white_bg,
         densify_from=args.densify_from,
         densify_until=args.densify_until if args.densify_until is not None else args.iters // 2,

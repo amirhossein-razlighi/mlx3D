@@ -30,6 +30,8 @@ Release branch in progress.
   reuse the differentiable Metal-backed feature rasterizer.
 - 2DGS surfel extraction helpers on `GaussianModel`, including a Poisson
   reconstruction wrapper for mesh extraction from oriented Gaussian disks.
+- 3DGUT-style Unscented Transform Gaussian projection for distortion-aware
+  rendering/training with `projection="ut"` and `--projection ut`.
 - PBR-style Cook-Torrance/GGX mesh shading with roughness and metallic controls.
 - Morton-order face sorting for ray-mesh intersection, improving chunk-level
   AABB culling on arbitrarily ordered meshes while preserving original face IDs.

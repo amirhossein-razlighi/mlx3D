@@ -16,7 +16,7 @@ from ..cameras import Camera
 from ..losses import ssim
 from ..transforms import quaternion_to_matrix
 from .model import GaussianModel
-from .projection import project_gaussians
+from .projection import project_gaussians, project_gaussians_ut
 from .rasterize import rasterize, rasterize_features
 from .sh import eval_sh
 from .tiles import bin_gaussians
@@ -39,6 +39,8 @@ class TrainerConfig:
     lambda_dssim: float = 0.2
     antialias: bool = False
     """Use Mip-Splatting-style opacity compensation for projection blur."""
+    projection: str = "ewa"
+    """Gaussian projection method: ``ewa`` or 3DGUT-style ``ut``."""
     lambda_2d_depth_variance: float = 0.0
     """2DGS-only ray-depth variance penalty; encourages one surface per pixel."""
     lambda_2d_normal_consistency: float = 0.0
@@ -83,6 +85,8 @@ class GaussianTrainer:
         self.config = config or TrainerConfig()
         if self.config.method not in {"vanilla", "mcmc", "2dgs"}:
             raise ValueError("TrainerConfig.method must be 'vanilla', 'mcmc', or '2dgs'")
+        if self.config.projection not in {"ewa", "ut"}:
+            raise ValueError("TrainerConfig.projection must be 'ewa' or 'ut'")
         self.scene_extent = scene_extent
         self.step_count = 0
         if self.config.low_memory:
@@ -262,7 +266,8 @@ class GaussianTrainer:
     ):
         """Photometric loss; ``means2d_probe`` (zeros) exposes screen-space
         positional gradients for densification."""
-        proj = project_gaussians(
+        project = project_gaussians_ut if self.config.projection == "ut" else project_gaussians
+        proj = project(
             camera,
             params["means"],
             params["quats"],
