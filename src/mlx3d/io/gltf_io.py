@@ -207,7 +207,9 @@ def _image_bytes(gltf: dict, buffers: list[bytes], root_dir: str, image_idx: int
     return raw[start:end]
 
 
-def _load_texture_image(gltf: dict, buffers: list[bytes], root_dir: str, texture_idx: int) -> mx.array:
+def _load_texture_image(
+    gltf: dict, buffers: list[bytes], root_dir: str, texture_idx: int
+) -> mx.array:
     tex = gltf["textures"][texture_idx]
     img_idx = int(tex["source"])
 
@@ -258,7 +260,9 @@ def load_gltf(path: str) -> GltfData:
             vh = np.concatenate([verts, np.ones((verts.shape[0], 1), dtype=np.float32)], axis=1)
             verts = (vh @ world.T)[:, :3].astype(np.float32)
             if "indices" in prim:
-                faces = _read_accessor(gltf, buffers, prim["indices"]).astype(np.int32).reshape(-1, 3)
+                faces = (
+                    _read_accessor(gltf, buffers, prim["indices"]).astype(np.int32).reshape(-1, 3)
+                )
             else:
                 faces = np.arange(verts.shape[0], dtype=np.int32).reshape(-1, 3)
             faces = faces + vert_offset

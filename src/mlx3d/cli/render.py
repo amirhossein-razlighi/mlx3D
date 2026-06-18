@@ -51,7 +51,9 @@ def _depth_to_rgb(depth: mx.array, alpha: mx.array) -> mx.array:
     far = mx.max(mx.where(valid, depth, mx.zeros_like(depth)))
     denom = mx.maximum(far - near, 1e-6)
     shade = 1.0 - (depth - near) / denom
-    return mx.broadcast_to(mx.clip(shade, 0.0, 1.0)[..., None], (*depth.shape, 3)) * alpha[..., None]
+    return (
+        mx.broadcast_to(mx.clip(shade, 0.0, 1.0)[..., None], (*depth.shape, 3)) * alpha[..., None]
+    )
 
 
 def _normal_to_rgb(normals: mx.array, alpha: mx.array) -> mx.array:
