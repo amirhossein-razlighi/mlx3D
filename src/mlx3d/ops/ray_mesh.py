@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import mlx.core as mx
+import numpy as np
 
 from ..structures import Meshes
 
-__all__ = ["ray_mesh_intersect"]
+__all__ = ["ray_mesh_intersect", "spatially_sort_faces"]
 
 _INF = 1e30
 
@@ -33,6 +34,56 @@ def _rays_intersect_aabb(
     return far >= mx.maximum(near, eps)
 
 
+def _expand_bits_10(v: np.ndarray) -> np.ndarray:
+    v = np.asarray(v, dtype=np.uint32) & np.uint32(0x3FF)
+    v = (v | (v << np.uint32(16))) & np.uint32(0x030000FF)
+    v = (v | (v << np.uint32(8))) & np.uint32(0x0300F00F)
+    v = (v | (v << np.uint32(4))) & np.uint32(0x030C30C3)
+    v = (v | (v << np.uint32(2))) & np.uint32(0x09249249)
+    return v
+
+
+def _morton_codes(points: np.ndarray) -> np.ndarray:
+    if points.shape[0] == 0:
+        return np.zeros((0,), dtype=np.uint32)
+    lo = points.min(axis=0)
+    hi = points.max(axis=0)
+    denom = np.maximum(hi - lo, 1e-12)
+    q = np.clip((points - lo) / denom * 1023.0, 0.0, 1023.0).astype(np.uint32)
+    return _expand_bits_10(q[:, 0]) | (_expand_bits_10(q[:, 1]) << 1) | (_expand_bits_10(q[:, 2]) << 2)
+
+
+def spatially_sort_faces(meshes: Meshes) -> tuple[Meshes, mx.array]:
+    """Return a copy with faces sorted by Morton code of their centroids.
+
+    Spatial ordering makes adjacent face chunks geometrically coherent, which
+    improves the effectiveness of chunk-level AABB culling in
+    :func:`ray_mesh_intersect`. The second return value maps sorted face rows
+    back to original packed face indices.
+    """
+    verts_list = meshes.verts_list()
+    sorted_faces = []
+    inverse_parts = []
+    face_offset = 0
+    for verts, faces in zip(verts_list, meshes.faces_list(), strict=True):
+        if faces.shape[0] == 0:
+            sorted_faces.append(faces)
+            continue
+        v_np = np.asarray(verts)
+        f_np = np.asarray(faces, dtype=np.int32)
+        centroids = v_np[f_np].mean(axis=1)
+        order = np.argsort(_morton_codes(centroids), kind="stable").astype(np.int32)
+        sorted_faces.append(mx.array(f_np[order]))
+        inverse_parts.append(mx.array(order + face_offset, dtype=mx.int32))
+        face_offset += faces.shape[0]
+    inverse = (
+        mx.concatenate(inverse_parts, axis=0)
+        if inverse_parts
+        else mx.zeros((0,), dtype=mx.int32)
+    )
+    return Meshes(verts_list, sorted_faces), inverse
+
+
 def ray_mesh_intersect(
     meshes: Meshes,
     origins: mx.array,
@@ -40,6 +91,7 @@ def ray_mesh_intersect(
     face_chunk_size: int = 4096,
     eps: float = 1e-8,
     aabb_cull: bool = True,
+    spatial_sort: bool = False,
     return_stats: bool = False,
 ) -> dict[str, object]:
     """Nearest ray-triangle hit per ray (Möller-Trumbore).
@@ -55,6 +107,9 @@ def ray_mesh_intersect(
             box before running the expensive ray-triangle math. This preserves
             exact results and skips whole chunks for coherent rays or spatially
             sorted meshes.
+        spatial_sort: sort faces by Morton code before chunking. This one-time
+            CPU preprocessing step is useful for arbitrary face orderings and
+            maps returned ``face_idx`` values back to the original packed faces.
         return_stats: include simple broad-phase counters useful for tests and
             profiling.
 
@@ -64,6 +119,9 @@ def ray_mesh_intersect(
         barycentric coords, and ``points`` ``(R, 3)`` world hit positions. The
         hit position is differentiable w.r.t. the mesh vertices.
     """
+    face_remap = None
+    if spatial_sort:
+        meshes, face_remap = spatially_sort_faces(meshes)
     verts = meshes.verts_packed()
     faces = meshes.faces_packed().astype(mx.int32)
     o = origins[:, None, :]  # (R, 1, 3)
@@ -115,6 +173,9 @@ def ray_mesh_intersect(
         best_uv = mx.where(closer[:, None], mx.stack([cu, cv], axis=-1), best_uv)
 
     hit_mask = best_f >= 0
+    if face_remap is not None and face_remap.shape[0] > 0:
+        safe_f = mx.where(hit_mask, best_f, 0)
+        best_f = mx.where(hit_mask, face_remap[safe_f], best_f)
     u, v = best_uv[:, 0], best_uv[:, 1]
     bary = mx.stack([1.0 - u - v, u, v], axis=-1) * hit_mask[:, None]
     t_out = mx.where(hit_mask, best_t, mx.full(best_t.shape, mx.inf))
@@ -131,5 +192,6 @@ def ray_mesh_intersect(
             "chunks_total": chunks_total,
             "chunks_skipped": chunks_skipped,
             "face_tests": face_tests,
+            "spatial_sort": bool(spatial_sort),
         }
     return out

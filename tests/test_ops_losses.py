@@ -24,6 +24,7 @@ from mlx3d.ops import (
     poisson_reconstruction,
     ray_mesh_intersect,
     sample_points_from_meshes,
+    spatially_sort_faces,
     subdivide_meshes,
 )
 from mlx3d.structures import Meshes
@@ -159,6 +160,70 @@ def test_ray_mesh_aabb_cull_handles_parallel_rays_inside_slab():
     assert bool(out["hit"][0])
     assert not bool(out["hit"][1])
     assert out["stats"]["chunks_skipped"] == 0
+
+
+def test_spatially_sort_faces_preserves_topology_with_face_remap():
+    verts = mx.array(
+        [
+            [10.0, 0.0, 0.0],
+            [11.0, 0.0, 0.0],
+            [10.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ]
+    )
+    faces = mx.array([[0, 1, 2], [3, 4, 5]], dtype=mx.int32)
+    sorted_mesh, remap = spatially_sort_faces(Meshes([verts], [faces]))
+
+    assert sorted(remap.tolist()) == [0, 1]
+    sorted_faces = np.array(sorted_mesh.faces_packed())
+    original = np.array(faces)
+    for new_i, old_i in enumerate(remap.tolist()):
+        np.testing.assert_array_equal(sorted_faces[new_i], original[old_i])
+
+
+def test_ray_mesh_spatial_sort_improves_chunk_culling_and_preserves_face_ids():
+    near = np.array(
+        [
+            [[-0.6, -0.6, 2.0], [0.6, -0.6, 2.0], [0.0, 0.6, 2.0]],
+            [[-0.5, -0.5, 2.5], [0.7, -0.5, 2.5], [0.1, 0.7, 2.5]],
+        ],
+        dtype=np.float32,
+    )
+    far = near + np.array([100.0, 100.0, 100.0], dtype=np.float32)
+    tris = np.stack([near[0], far[0], near[1], far[1]], axis=0)
+    verts = mx.array(tris.reshape(-1, 3))
+    faces = mx.arange(12, dtype=mx.int32).reshape(4, 3)
+    mesh = Meshes([verts], [faces])
+    origins = mx.array([[0.0, 0.0, 0.0]])
+    directions = mx.array([[0.0, 0.0, 1.0]])
+
+    unsorted = ray_mesh_intersect(
+        mesh,
+        origins,
+        directions,
+        face_chunk_size=2,
+        aabb_cull=True,
+        spatial_sort=False,
+        return_stats=True,
+    )
+    sorted_out = ray_mesh_intersect(
+        mesh,
+        origins,
+        directions,
+        face_chunk_size=2,
+        aabb_cull=True,
+        spatial_sort=True,
+        return_stats=True,
+    )
+
+    assert bool(sorted_out["hit"][0])
+    assert int(sorted_out["face_idx"][0]) == int(unsorted["face_idx"][0]) == 0
+    np.testing.assert_allclose(np.array(sorted_out["t"]), np.array(unsorted["t"]), atol=1e-6)
+    assert sorted_out["stats"]["chunks_skipped"] > unsorted["stats"]["chunks_skipped"]
+    assert sorted_out["stats"]["face_tests"] < unsorted["stats"]["face_tests"]
+    assert sorted_out["stats"]["spatial_sort"] is True
 
 
 def test_subdivide_meshes_counts_and_validity():
