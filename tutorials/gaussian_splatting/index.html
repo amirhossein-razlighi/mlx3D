@@ -1,0 +1,1719 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Differentiable 3D computer vision on Apple Silicon, built on MLX">
+      
+      
+      
+        <link rel="canonical" href="https://amirhossein-razlighi.github.io/mlx3D/tutorials/gaussian_splatting/">
+      
+      
+        <link rel="prev" href="../hashgrid_nerf/">
+      
+      
+        <link rel="next" href="../extending/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/mlx3d-icon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Gaussian Splatting - MLX3D</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="deep-purple">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#gaussian-splatting" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="MLX3D" class="md-header__button md-logo" aria-label="MLX3D" data-md-component="logo">
+      
+  <img src="../../assets/mlx3d-icon.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            MLX3D
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Gaussian Splatting
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="deep-purple" data-md-color-accent="deep-purple"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/amirhossein-razlighi/mlx3D" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    mlx3D
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="MLX3D" class="md-nav__button md-logo" aria-label="MLX3D" data-md-component="logo">
+      
+  <img src="../../assets/mlx3d-icon.png" alt="logo">
+
+    </a>
+    MLX3D
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/amirhossein-razlighi/mlx3D" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    mlx3D
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../conventions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Conventions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../viewer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interactive Viewer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mesh_optimization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mesh Optimization
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mesh_rendering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mesh Rendering and Extraction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mesh_lighting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mesh Lighting and Shading
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pointcloud_fitting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Point Cloud Fitting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../nerf/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NeRF: Neural Radiance Fields
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../hashgrid_nerf/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hash-Grid NeRF Encodings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gaussian Splatting
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gaussian Splatting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#how-the-renderer-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the renderer works
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rendering" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rendering
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#training-on-a-colmap-scene" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Training on a COLMAP scene
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#low-memory-training-8-16-gb-macs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Low-memory training (8-16 GB Macs)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#blender-synthetic-scenes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Blender-synthetic scenes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inspecting-the-result" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inspecting the result
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Checkpoints
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../extending/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extending MLX3D
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/structures/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Structures
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/cameras/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cameras
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/transforms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transforms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/io/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IO
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/ops/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ops
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/losses/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Losses
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/renderer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Renderer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/nn/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Neural Networks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/splatting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gaussian Splatting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/datasets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Datasets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/viewer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Viewer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/utils/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Utils
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#how-the-renderer-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the renderer works
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rendering" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rendering
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#training-on-a-colmap-scene" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Training on a COLMAP scene
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#low-memory-training-8-16-gb-macs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Low-memory training (8-16 GB Macs)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#blender-synthetic-scenes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Blender-synthetic scenes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inspecting-the-result" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inspecting the result
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Checkpoints
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="gaussian-splatting">Gaussian Splatting<a class="headerlink" href="#gaussian-splatting" title="Permanent link">&para;</a></h1>
+<p>Train and render <a href="https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/">3D Gaussian Splatting</a>
+scenes on Apple Silicon. MLX3D ships a Metal translation of the reference
+CUDA rasterizer — tile-based forward <strong>and</strong> backward kernels — wrapped in
+<code>mx.custom_function</code> so the whole pipeline is differentiable end to end.
+Full script:
+<a href="https://github.com/amirhossein-razlighi/mlx3D/blob/main/examples/train_gaussian_splatting.py"><code>examples/train_gaussian_splatting.py</code></a>.</p>
+<p align="center"><img src="../../assets/v020_truck_render_hi.png" width="92%" /></p>
+<p align="center"><em>Truck scene rendered from a trained 3DGS checkpoint with the MLX3D Metal rasterizer and anti-aliasing enabled.</em></p>
+
+<h2 id="how-the-renderer-works">How the renderer works<a class="headerlink" href="#how-the-renderer-works" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Projection</strong> (pure MLX, autodiff): each Gaussian's quaternion + scale
+   build a 3D covariance <span class="arithmatex">\( \Sigma = R S S^T R^T \)</span>, which the EWA splatting
+   approximation maps to a 2D screen-space covariance
+   <span class="arithmatex">\( \Sigma' = J W \Sigma W^T J^T \)</span>.</li>
+<li><strong>Tile binning</strong>: Gaussians are assigned to all 16×16 pixel tiles their
+   3σ extent touches and sorted by (tile, depth) — fully vectorized MLX.</li>
+<li><strong>Rasterization</strong> (Metal kernels): one threadgroup per tile streams its
+   depth-sorted Gaussians through threadgroup memory while 256 threads
+   alpha-composite their pixels front-to-back with early termination. The
+   backward kernel traverses back-to-front and accumulates gradients with
+   atomic adds — the same design as the reference implementation.</li>
+</ol>
+<p>A pure-MLX reference renderer (<code>render_gaussians_reference</code>) verifies the
+kernels: forward images match to float32 precision and all gradients match
+the autodiff oracle to ~1e-7 relative error (see <code>tests/test_splatting.py</code>).</p>
+<h2 id="rendering">Rendering<a class="headerlink" href="#rendering" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">mlx.core</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">mx</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mlx3d.cameras</span><span class="w"> </span><span class="kn">import</span> <span class="n">Camera</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mlx3d.splatting</span><span class="w"> </span><span class="kn">import</span> <span class="n">render_gaussians</span>
+
+<span class="n">camera</span> <span class="o">=</span> <span class="n">Camera</span><span class="o">.</span><span class="n">look_at</span><span class="p">(</span><span class="n">eye</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="o">-</span><span class="mi">4</span><span class="p">),</span> <span class="n">at</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span> <span class="n">width</span><span class="o">=</span><span class="mi">1280</span><span class="p">,</span> <span class="n">height</span><span class="o">=</span><span class="mi">720</span><span class="p">)</span>
+
+<span class="n">out</span> <span class="o">=</span> <span class="n">render_gaussians</span><span class="p">(</span>
+    <span class="n">camera</span><span class="p">,</span>
+    <span class="n">means</span><span class="p">,</span>        <span class="c1"># (N, 3)</span>
+    <span class="n">quats</span><span class="p">,</span>        <span class="c1"># (N, 4) (w, x, y, z)</span>
+    <span class="n">scales</span><span class="p">,</span>       <span class="c1"># (N, 3) standard deviations (post-activation)</span>
+    <span class="n">opacities</span><span class="p">,</span>    <span class="c1"># (N,) in [0, 1]</span>
+    <span class="n">colors</span><span class="o">=</span><span class="n">rgb</span><span class="p">,</span>   <span class="c1"># or sh=... for view-dependent color</span>
+<span class="p">)</span>
+<span class="n">out</span><span class="p">[</span><span class="s2">&quot;image&quot;</span><span class="p">]</span>   <span class="c1"># (720, 1280, 3) — differentiable w.r.t. all inputs</span>
+<span class="n">out</span><span class="p">[</span><span class="s2">&quot;alpha&quot;</span><span class="p">]</span>   <span class="c1"># (720, 1280) accumulated opacity — also differentiable</span>
+</code></pre></div>
+<p>For scenes with tiny/high-frequency splats, enable anti-aliasing:</p>
+<div class="highlight"><pre><span></span><code><span class="n">out</span> <span class="o">=</span> <span class="n">render_gaussians</span><span class="p">(</span><span class="o">...</span><span class="p">,</span> <span class="n">antialias</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+<p>This keeps the standard screen-space blur but applies the Mip-Splatting-style
+opacity compensation <span class="arithmatex">\( \sqrt{\det(\Sigma) / \det(\Sigma + \epsilon I)} \)</span>,
+which reduces over-bright subpixel Gaussians without changing the default
+3DGS-compatible rendering path.</p>
+<p>The same Metal path can render arbitrary per-Gaussian feature channels in
+chunks of three, reusing the RGB kernel and its backward pass:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">mlx3d.splatting</span><span class="w"> </span><span class="kn">import</span> <span class="n">render_gaussian_features</span>
+
+<span class="n">features</span> <span class="o">=</span> <span class="n">mx</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span>
+    <span class="p">[</span><span class="n">depths</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">],</span> <span class="n">normals</span><span class="p">,</span> <span class="n">semantic_logits</span><span class="p">],</span> <span class="n">axis</span><span class="o">=-</span><span class="mi">1</span>
+<span class="p">)</span>  <span class="c1"># (N, C)</span>
+
+<span class="n">out</span> <span class="o">=</span> <span class="n">render_gaussian_features</span><span class="p">(</span>
+    <span class="n">camera</span><span class="p">,</span>
+    <span class="n">means</span><span class="p">,</span>
+    <span class="n">quats</span><span class="p">,</span>
+    <span class="n">scales</span><span class="p">,</span>
+    <span class="n">opacities</span><span class="p">,</span>
+    <span class="n">features</span><span class="p">,</span>
+    <span class="n">normalize</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>  <span class="c1"># expected feature = sum(alpha_i T_i f_i) / alpha</span>
+<span class="p">)</span>
+<span class="n">out</span><span class="p">[</span><span class="s2">&quot;features&quot;</span><span class="p">]</span>  <span class="c1"># (720, 1280, C)</span>
+</code></pre></div>
+<p>Use <code>normalize=False</code> with a feature-space <code>background</code> when you want ordinary
+alpha compositing instead of expected features.</p>
+<p>The packaged render CLI exposes the same paths for checkpoints. These are
+real outputs from the truck checkpoint:</p>
+<p align="center">
+  <img src="../../assets/v020_truck_depth_hi.png" width="45%" />
+  <img src="../../assets/v020_truck_normals_hi.png" width="45%" />
+</p>
+<p align="center"><em>Expected depth and rendered Gaussian normal features from the same truck checkpoint.</em></p>
+
+<p>On an M-series GPU, 100k Gaussians render at ~30 FPS at 720p, with a full
+forward+backward training step around 100 ms.</p>
+<h2 id="training-on-a-colmap-scene">Training on a COLMAP scene<a class="headerlink" href="#training-on-a-colmap-scene" title="Permanent link">&para;</a></h2>
+<p>Any dataset prepared for the original 3DGS works as-is (a <code>sparse/0</code>
+reconstruction plus an <code>images/</code> folder):</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>examples/train_gaussian_splatting.py<span class="w"> </span>--data<span class="w"> </span>/path/to/scene<span class="w"> </span>--iters<span class="w"> </span><span class="m">7000</span>
+</code></pre></div>
+<p>To watch training as it happens, start the live viewer from the same command:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>examples/train_gaussian_splatting.py<span class="w"> </span>--data<span class="w"> </span>/path/to/scene<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--iters<span class="w"> </span><span class="m">7000</span><span class="w"> </span>--downscale<span class="w"> </span><span class="m">4</span><span class="w"> </span>--viewer
+</code></pre></div>
+<p>Pass <code>--antialias</code> to train with the same opacity compensation used by
+<code>render_gaussians(..., antialias=True)</code>.</p>
+<p>The viewer opens a local browser page and polls lightweight metadata while
+requesting rendered JPEG frames only when the view changes. Training publishes a
+fresh evaluated Gaussian snapshot every <code>--viewer-update-every</code> iterations
+(default: 25), so the preview does not copy the whole model to CPU or refresh
+on every optimizer step. Use <code>--viewer-no-browser</code> on remote shells and
+<code>--viewer-keep-open</code> if you want the viewer to remain active after training.
+Press <code>D</code> in the viewer to switch between RGB and the forward-only Metal depth
+map for geometry inspection, or <code>M</code> for a mesh-style depth-contour view.</p>
+<p>What the script does, in code:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">mlx3d.datasets</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_colmap</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mlx3d.splatting</span><span class="w"> </span><span class="kn">import</span> <span class="n">GaussianModel</span><span class="p">,</span> <span class="n">GaussianTrainer</span><span class="p">,</span> <span class="n">TrainerConfig</span>
+
+<span class="n">ds</span> <span class="o">=</span> <span class="n">load_colmap</span><span class="p">(</span><span class="s2">&quot;scene/&quot;</span><span class="p">)</span>                       <span class="c1"># cameras, images, SfM points</span>
+<span class="n">model</span> <span class="o">=</span> <span class="n">GaussianModel</span><span class="o">.</span><span class="n">from_points</span><span class="p">(</span><span class="n">ds</span><span class="o">.</span><span class="n">points</span><span class="p">,</span> <span class="n">ds</span><span class="o">.</span><span class="n">point_colors</span><span class="p">)</span>
+<span class="n">trainer</span> <span class="o">=</span> <span class="n">GaussianTrainer</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">TrainerConfig</span><span class="p">(),</span> <span class="n">scene_extent</span><span class="o">=</span><span class="n">ds</span><span class="o">.</span><span class="n">scene_extent</span><span class="p">)</span>
+
+<span class="k">for</span> <span class="n">it</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">7000</span><span class="p">):</span>
+    <span class="n">cam</span><span class="p">,</span> <span class="n">img</span> <span class="o">=</span> <span class="n">ds</span><span class="p">[</span><span class="n">it</span> <span class="o">%</span> <span class="nb">len</span><span class="p">(</span><span class="n">ds</span><span class="p">)]</span>                  <span class="c1"># shuffle in practice</span>
+    <span class="n">info</span> <span class="o">=</span> <span class="n">trainer</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">cam</span><span class="p">,</span> <span class="n">img</span><span class="p">)</span>                <span class="c1"># L1 + D-SSIM, ADC, SH growth</span>
+
+<span class="n">model</span><span class="o">.</span><span class="n">save_ply</span><span class="p">(</span><span class="s2">&quot;point_cloud.ply&quot;</span><span class="p">)</span>                <span class="c1"># standard 3DGS checkpoint</span>
+</code></pre></div>
+<p><code>GaussianTrainer</code> implements the paper's recipe:</p>
+<ul>
+<li>per-parameter Adam learning rates (positions scaled by scene extent and
+  exponentially decayed from <code>--position-lr-final</code> over
+  <code>--position-lr-max-steps</code>),</li>
+<li>loss <span class="arithmatex">\( (1-\lambda)\,L_1 + \lambda\,(1 - \text{SSIM}) \)</span> with <span class="arithmatex">\( \lambda = 0.2 \)</span>,</li>
+<li><strong>adaptive density control</strong> — screen-space positional gradients are
+  accumulated per Gaussian; high-gradient small Gaussians are cloned,
+  high-gradient large ones split, transparent/oversized ones pruned,</li>
+<li>periodic opacity resets and progressive SH degree growth.</li>
+</ul>
+<p>The adaptive-density schedule is configurable from the training script:
+<code>--densify-from</code>, <code>--densify-until</code>, <code>--densify-every</code>, and
+<code>--densify-grad-threshold</code>. Gradient statistics are accumulated on the MLX
+device and only synchronized when clone/split/prune runs, keeping normal
+training steps GPU-resident. When densification changes the Gaussian table,
+Adam moments are preserved for surviving Gaussians and initialized to zero for
+new clone/split children.</p>
+<p>The default optimization method is vanilla 3DGS. For fixed-budget experiments,
+pass <code>--method mcmc</code> to replace clone/split growth with MCMC-style relocation:
+low-opacity or unused Gaussians are moved near high-gradient Gaussians at
+density-control events, Adam moments for moved rows are reset, and optional
+SGLD-like xyz noise is controlled with <code>--mcmc-noise-scale</code>. Useful knobs are
+<code>--mcmc-relocate-frac</code>, <code>--mcmc-min-opacity</code>, and <code>--mcmc-jitter-scale</code>.</p>
+<p>For surfel-style experiments, pass <code>--method 2dgs</code>. This keeps the vanilla
+Metal projection/rasterization path but clamps each Gaussian's local normal
+axis to a thin disk, controlled by <code>--2d-thickness</code> as a fraction of scene
+extent. The output remains a standard 3DGS PLY, so checkpoints still open in
+the built-in viewer and other splat viewers.</p>
+<p>2DGS geometry regularization is opt-in. <code>--2d-depth-variance</code> penalizes
+per-pixel depth variance along a ray, and <code>--2d-normal-consistency</code> aligns
+rendered surfel normals with normals derived from the expected depth map.
+Both terms reuse the differentiable feature rasterizer, so they keep gradients
+on the Metal-backed splatting path. <code>--geometry-min-alpha</code> controls which
+pixels are included in those auxiliary losses.</p>
+<p>For mesh extraction from a surfel-style checkpoint, use
+<code>GaussianModel.extract_surface_mesh(...)</code>. It filters Gaussians by opacity,
+ranks capped samples by surfel footprint, uses each Gaussian's local normal
+axis as the oriented point normal, and feeds those surfels to the Poisson
+reconstruction utility.</p>
+<p>For distorted or fisheye cameras, pass <code>--projection ut</code> in the training
+script or <code>projection="ut"</code> in the render APIs. This uses a 3DGUT-style
+Unscented Transform: six 3D sigma points are projected through the full
+<code>Camera.project_points</code> model, then converted back to a 2D Gaussian. It is
+slower than the default analytic EWA projection, but it respects Brown-Conrady,
+fisheye, and orthographic camera projection.</p>
+<p>For command-line renders:</p>
+<div class="highlight"><pre><span></span><code>mlx3d-render<span class="w"> </span>outputs/gs_truck/point_cloud.ply<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--out<span class="w"> </span>truck.png<span class="w"> </span>--width<span class="w"> </span><span class="m">1280</span><span class="w"> </span>--height<span class="w"> </span><span class="m">720</span><span class="w"> </span>--antialias<span class="w"> </span>--up<span class="w"> </span><span class="m">0</span><span class="w"> </span>-1<span class="w"> </span><span class="m">0</span>
+mlx3d-render<span class="w"> </span>outputs/gs_truck/point_cloud.ply<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--mode<span class="w"> </span>depth<span class="w"> </span>--out<span class="w"> </span>truck_depth.png<span class="w"> </span>--up<span class="w"> </span><span class="m">0</span><span class="w"> </span>-1<span class="w"> </span><span class="m">0</span>
+mlx3d-render<span class="w"> </span>outputs/gs_truck/point_cloud.ply<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--mode<span class="w"> </span>normal<span class="w"> </span>--out<span class="w"> </span>truck_normals.png<span class="w"> </span>--up<span class="w"> </span><span class="m">0</span><span class="w"> </span>-1<span class="w"> </span><span class="m">0</span>
+</code></pre></div>
+<p>Periodic saves render a deterministic held training view and report PSNR.
+Set <code>--eval-views N</code> to average that save-time PSNR over <code>N</code> evenly spaced
+training views while still saving the first rendered image. The default is one
+view to keep periodic saves cheap.</p>
+<p>For a standalone evaluation pass after training:</p>
+<div class="highlight"><pre><span></span><code>mlx3d-eval<span class="w"> </span>outputs/gs/point_cloud.ply<span class="w"> </span>--data<span class="w"> </span>/path/to/scene<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--format<span class="w"> </span>colmap<span class="w"> </span>--views<span class="w"> </span><span class="m">20</span><span class="w"> </span>--json-out<span class="w"> </span>metrics.json
+</code></pre></div>
+<p>The command renders evenly spaced views and reports mean PSNR, SSIM, and L1
+alongside per-view metrics. Use <code>--format blender --split test</code> for
+NeRF-synthetic scenes and <code>--antialias</code> to score the anti-aliased render path.</p>
+<div class="admonition note">
+<p class="admonition-title">Method variants</p>
+<p>The default trainer remains vanilla 3DGS. MCMC-style fixed-budget
+relocation is available with <code>--method mcmc</code>; surfel-style 2DGS is
+available with <code>--method 2dgs</code>. The 2DGS depth-variance and normal-depth
+consistency losses are explicit opt-ins rather than hidden changes to the
+default path. The default projection remains fast analytic EWA; the
+distortion-aware UT projection is selected explicitly with <code>--projection ut</code>.</p>
+</div>
+<h2 id="low-memory-training-8-16-gb-macs">Low-memory training (8-16 GB Macs)<a class="headerlink" href="#low-memory-training-8-16-gb-macs" title="Permanent link">&para;</a></h2>
+<p>Three independent knobs keep training inside a small unified-memory budget:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>examples/train_gaussian_splatting.py<span class="w"> </span>--data<span class="w"> </span>/path/to/scene<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--iters<span class="w"> </span><span class="m">7000</span><span class="w"> </span>--downscale<span class="w"> </span><span class="m">2</span><span class="w"> </span>--low-mem
+</code></pre></div>
+<p><code>--low-mem</code> bundles:</p>
+<ul>
+<li><strong><code>--image-cache uint8</code></strong> — training views are held as uint8 instead of
+  float32 (4x less; ~0.4 GB instead of 1.6 GB for the <em>truck</em> scene at
+  half resolution). Use <code>--image-cache disk</code> to keep only file paths and
+  decode per step (near-zero resident memory, ~10-30 ms/view decode).</li>
+<li><strong><code>--max-gaussians 1200000</code></strong> — adaptive density control stops cloning
+  and splitting at the cap (pruning continues), bounding model + optimizer
+  memory.</li>
+<li><strong><code>TrainerConfig(low_memory=True)</code></strong> — caps MLX's buffer cache
+  (<code>mx.set_cache_limit</code>) and clears it after each densification, which is
+  when shape churn would otherwise grow the cache by gigabytes.</li>
+</ul>
+<p>The same options exist in the API:</p>
+<div class="highlight"><pre><span></span><code><span class="n">ds</span> <span class="o">=</span> <span class="n">load_colmap</span><span class="p">(</span><span class="s2">&quot;scene/&quot;</span><span class="p">,</span> <span class="n">downscale</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="s2">&quot;uint8&quot;</span><span class="p">)</span>
+<span class="n">config</span> <span class="o">=</span> <span class="n">TrainerConfig</span><span class="p">(</span><span class="n">max_gaussians</span><span class="o">=</span><span class="mi">1_200_000</span><span class="p">,</span> <span class="n">low_memory</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+<p>As a rule of thumb, a 16 GB machine handles COLMAP scenes comfortably at
+<code>--downscale 2 --low-mem</code>; on 8 GB add <code>--downscale 4</code> and a lower
+<code>--max-gaussians</code>.</p>
+<p>COLMAP point clouds can contain sparse outliers. MLX3D caps the initial
+nearest-neighbor Gaussian scale to <code>0.01 * scene_extent</code> by default
+(<code>--init-scale-max-frac 0.01</code>), which avoids full-screen opaque splats during
+the first iterations. Pass <code>--init-scale-max-frac 0</code> to disable the cap when
+comparing against older behavior.</p>
+<p>For quick timing and memory checks, use the benchmark helper:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>examples/benchmark_gaussian_splatting.py<span class="w"> </span>--data<span class="w"> </span>/path/to/scene<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--downscale<span class="w"> </span><span class="m">4</span><span class="w"> </span>--steps<span class="w"> </span><span class="m">20</span><span class="w"> </span>--seed<span class="w"> </span><span class="m">0</span><span class="w"> </span>--eval-views<span class="w"> </span><span class="m">3</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--save-render<span class="w"> </span>/tmp/mlx3d_bench.png
+</code></pre></div>
+<p>The JSON report includes startup/init time, first-step and warmup timings,
+post-warmup mean/median/p90/p95/max step latency, render-stage timings,
+density-event wall times, memory counters, and deterministic multi-view PSNR.
+Use the same <code>--seed</code>, <code>--eval-views</code>, method, and densification settings when
+comparing variants.</p>
+<h2 id="blender-synthetic-scenes">Blender-synthetic scenes<a class="headerlink" href="#blender-synthetic-scenes" title="Permanent link">&para;</a></h2>
+<p>No SfM points? Initialize randomly:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>examples/train_gaussian_splatting.py<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--data<span class="w"> </span>nerf_synthetic/lego<span class="w"> </span>--format<span class="w"> </span>blender<span class="w"> </span>--iters<span class="w"> </span><span class="m">7000</span>
+</code></pre></div>
+<h2 id="inspecting-the-result">Inspecting the result<a class="headerlink" href="#inspecting-the-result" title="Permanent link">&para;</a></h2>
+<p>Open any checkpoint in the <a href="../../viewer/">interactive viewer</a> — orbit, pan
+and zoom in the browser, rendered live by the Metal kernels:</p>
+<div class="highlight"><pre><span></span><code>mlx3d-view<span class="w"> </span>outputs/gs/point_cloud.ply
+</code></pre></div>
+<h2 id="checkpoints">Checkpoints<a class="headerlink" href="#checkpoints" title="Permanent link">&para;</a></h2>
+<p><code>save_ply</code> / <code>GaussianModel.load_ply</code> use the standard 3DGS PLY layout
+(<code>f_dc_*</code>, <code>f_rest_*</code>, <code>opacity</code>, <code>scale_*</code>, <code>rot_*</code>), so checkpoints open
+directly in common viewers (SuperSplat, Polycam viewer, gsplat tools, ...)
+and you can fine-tune checkpoints trained elsewhere.</p>
+<p>For smaller deployment checkpoints, compact a trained model before saving:</p>
+<div class="highlight"><pre><span></span><code><span class="n">compact</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">compact</span><span class="p">(</span>
+    <span class="n">min_opacity</span><span class="o">=</span><span class="mf">0.01</span><span class="p">,</span>
+    <span class="n">max_gaussians</span><span class="o">=</span><span class="mi">500_000</span><span class="p">,</span>
+    <span class="n">target_sh_degree</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">compact</span><span class="o">.</span><span class="n">save_ply</span><span class="p">(</span><span class="s2">&quot;point_cloud_compact.ply&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>Or run the packaged CLI:</p>
+<div class="highlight"><pre><span></span><code>mlx3d-compact<span class="w"> </span>outputs/gs/point_cloud.ply<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--out<span class="w"> </span>outputs/gs/point_cloud_compact.ply<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--min-opacity<span class="w"> </span><span class="m">0</span>.01<span class="w"> </span>--max-gaussians<span class="w"> </span><span class="m">500000</span><span class="w"> </span>--sh-degree<span class="w"> </span><span class="m">2</span>
+</code></pre></div>
+<p>Compaction ranks Gaussians by a view-independent footprint proxy,
+<code>opacity * max_scale^2</code>, preserves retained row order, and can lower the
+spherical-harmonic degree when view-dependent color detail is less important
+than file size and render cost.</p>
+<div class="admonition note">
+<p class="admonition-title">Current limitations</p>
+<ul>
+<li>One camera per <code>step</code> call.</li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "navigation.top", "content.code.copy", "content.code.annotate", "search.suggest"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
