@@ -94,4 +94,4 @@ Contributions are welcome — file an issue to get started.
 
 ## License
 
-GPL-3.0
+MIT
