@@ -165,7 +165,30 @@ def marching_cubes(
 
     if not all_verts:
         return _empty_mesh()
+
+    verts = np.concatenate(all_verts, axis=0).astype(np.float32)
+    faces = np.concatenate(all_faces, axis=0).astype(np.int64)
+
+    # Weld duplicate vertices. Each tet emits its own crossing points, but a
+    # surface edge is shared by several tets and its crossing point is computed
+    # identically each time, so without welding the mesh has ~2.5x more verts
+    # than it needs -- inflating memory and every downstream op (normals,
+    # sampling, rendering). Quantize to a small fraction of the voxel size to
+    # merge coincident points robustly, then remap faces to the unique verts.
+    quantum = float(spacing_np.min()) * 1e-4 + 1e-12
+    keys = np.round(verts / quantum).astype(np.int64)
+    _, first_idx, inverse = np.unique(keys, axis=0, return_index=True, return_inverse=True)
+    welded_verts = verts[first_idx]
+    welded_faces = inverse[faces].astype(np.int32)
+    # Drop degenerate triangles that collapsed when their corners welded together.
+    nondegen = (
+        (welded_faces[:, 0] != welded_faces[:, 1])
+        & (welded_faces[:, 1] != welded_faces[:, 2])
+        & (welded_faces[:, 0] != welded_faces[:, 2])
+    )
+    welded_faces = welded_faces[nondegen]
+
     return Meshes(
-        [mx.array(np.concatenate(all_verts, axis=0).astype(np.float32))],
-        [mx.array(np.concatenate(all_faces, axis=0).astype(np.int32))],
+        [mx.array(welded_verts.astype(np.float32))],
+        [mx.array(welded_faces.astype(np.int32))],
     )

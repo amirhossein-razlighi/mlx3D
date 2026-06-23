@@ -43,6 +43,36 @@ def test_fused_mlp_is_trainable():
     assert sum(float(mx.abs(v).sum()) for _, v in mu.tree_flatten(grads)) > 0
 
 
+def test_nerf_density_and_gradients_are_nonzero_at_init():
+    # Regression: the classic NeRF used a ReLU density activation, which dies
+    # at init (density 0 everywhere -> zero gradients -> the model never
+    # trains). Density must be positive and gradients must flow from the start.
+    import mlx.nn as nn
+    import mlx.utils as mu
+
+    mx.random.seed(0)
+    model = NeRF(pos_freqs=6, dir_freqs=4, hidden_dim=64, num_layers=4, skip_layer=2)
+    o = mx.random.normal((128, 3)) * 0.1 + mx.array([0.0, 0.0, 3.0])
+    d = mx.random.normal((128, 3))
+    d = d / mx.linalg.norm(d, axis=-1, keepdims=True)
+    c = mx.random.uniform(shape=(128, 3))
+
+    pts, _ = sample_along_rays(o, d, 1.0, 4.0, 32, stratified=False)
+    view = mx.broadcast_to(d[:, None, :], pts.shape)
+    density, _ = model(pts, view)
+    mx.eval(density)
+    assert float(density.max()) > 0.0  # density actually fires at init
+
+    def loss(m):
+        out = render_rays(m, o, d, 1.0, 4.0, num_coarse=32)
+        return mx.mean((out["rgb"] - c) ** 2)
+
+    _, grads = nn.value_and_grad(model, loss)(model)
+    mx.eval(grads)
+    total = sum(float(mx.abs(v).sum()) for _, v in mu.tree_flatten(grads))
+    assert total > 0.0  # gradients flow to the network
+
+
 def assert_close(a, b, atol=1e-5):
     np.testing.assert_allclose(np.array(a), np.array(b), atol=atol)
 
