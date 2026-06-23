@@ -110,3 +110,29 @@ mesh = marching_cubes(
 )
 print(mesh.verts_packed().shape, mesh.faces_packed().shape)
 ```
+
+## Signed Distance Functions
+
+For procedural shapes you usually do not have a grid in hand — you have a
+*function*. The `sdf_*` helpers in `mlx3d.ops` give analytic primitives
+(`sdf_sphere`, `sdf_box`, `sdf_torus`, `sdf_plane`) and constructive-solid-geometry
+operators (`sdf_union`, `sdf_intersection`, `sdf_difference`, and their smooth
+`sdf_smooth_*` variants) that compose with plain function calls. `sdf_to_mesh`
+samples such a function on a grid and runs marching cubes for you:
+
+```python
+import mlx.core as mx
+from mlx3d.ops import sdf_box, sdf_sphere, sdf_smooth_difference, sdf_to_mesh
+
+def model(p: mx.array) -> mx.array:
+    cube = sdf_box(p, half_extents=(0.6, 0.6, 0.6))
+    bite = sdf_sphere(p, radius=0.78, center=(0.55, 0.55, 0.55))
+    return sdf_smooth_difference(cube, bite, k=0.15)
+
+mesh = sdf_to_mesh(model, resolution=96, bounds=1.4)
+```
+
+Because the primitives and operators are pure MLX, the field is differentiable
+w.r.t. its parameters (radii, centers, ...), so the same helpers double as a
+loss for SDF shape fitting. See `examples/sdf_csg.py` for a full CSG-to-render
+walkthrough.
