@@ -34,6 +34,18 @@ dependencies = [
   "tqdm>=4.66",
 ]
 
+# Dev tooling is exposed two ways so every workflow works out of the box:
+#   * project.optional-dependencies -> `pip install -e ".[dev]"` (any installer)
+#   * dependency-groups (PEP 735)   -> `uv sync` installs it automatically
+# Keep the two lists in sync.
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.5",
+  "mkdocs-material>=9.5",
+  "mkdocstrings[python]>=0.24",
+]
+
 [dependency-groups]
 dev = [
   "pytest>=8.0",

@@ -21,7 +21,7 @@ import mlx.core as mx
 from mlx3d.cameras import Camera
 from mlx3d.io import save_image, save_obj
 from mlx3d.ops import marching_cubes
-from mlx3d.renderer import render_mesh_soft
+from mlx3d.renderer import interpolate_face_attributes, rasterize_meshes
 
 
 def main() -> None:
@@ -55,11 +55,16 @@ def main() -> None:
     )
     normals = mesh.verts_normals_packed()
     verts_colors = 0.5 * normals + 0.5
-    out = render_mesh_soft(
-        camera, mesh, verts_colors=verts_colors, sigma=3e-3, background=(0.05, 0.05, 0.08)
-    )
-    mx.eval(out["image"])
-    save_image(args.render, out["image"])
+    # Marching cubes yields tens of thousands of faces; the hard rasterizer is
+    # O(H*W) (not O(F*H*W) like the soft renderer), so it stays fast and within
+    # memory on Apple Silicon for dense meshes. Use the soft renderer only when
+    # you need silhouette gradients on a small mesh.
+    frag = rasterize_meshes(camera, mesh)
+    color = interpolate_face_attributes(frag, verts_colors)  # (H, W, 3), 0 where empty
+    background = mx.array([0.05, 0.05, 0.08])
+    image = mx.where(frag.valid[..., None], color, background)
+    mx.eval(image)
+    save_image(args.render, image)
     print(f"Saved {args.render}")
 
 
