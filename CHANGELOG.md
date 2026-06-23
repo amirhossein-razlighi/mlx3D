@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.1
+
+### Fixed
+
+- NeRF training: the classic `NeRF` model used a ReLU density activation that
+  dies at initialization (density 0 everywhere, zero gradients), so the network
+  never trained. Switched to softplus; added a regression test.
+- Soft mesh rasterizer (`render_mesh_soft`): per-chunk accumulators are now
+  evaluated each iteration so intermediates are freed between chunks. Peak
+  memory for dense meshes is bounded (a 46k-face mesh at 256² went from OOM on
+  16 GB to ~1.2 GB) while staying fully differentiable.
+- `marching_cubes` now welds duplicate crossing-point vertices (≈5× fewer verts
+  on a 64³ grid) and drops collapsed faces, cutting downstream memory and cost.
+- `examples/extract_mesh.py` visualizes dense meshes with the O(H·W) hard
+  rasterizer instead of the soft renderer (68 s + OOM → ~0.4 s).
+
+### Packaging
+
+- Added a standard `project.optional-dependencies` `dev` extra so
+  `pip install -e ".[dev]"` works with any installer (the PEP 735
+  `dependency-groups` entry is kept for `uv sync`). Documented both dev setups,
+  including the uv-venv `pip` caveat, in the README.
+
 ## 0.2.0
 
 Release branch in progress.
