@@ -2,6 +2,15 @@
 
 ## 0.2.1
 
+### Added
+
+- SDF utilities in `mlx3d.ops`: analytic primitives (`sdf_sphere`, `sdf_box`,
+  `sdf_torus`, `sdf_plane`), constructive-solid-geometry operators
+  (`sdf_union`, `sdf_intersection`, `sdf_difference` and smooth `sdf_smooth_*`
+  variants), and `sample_sdf_grid` / `sdf_to_mesh` to turn an SDF callable into
+  a mesh via marching cubes. All pure-MLX and differentiable w.r.t. shape
+  parameters. New `examples/sdf_csg.py` shows CSG modeling through to a render.
+
 ### Fixed
 
 - NeRF training: the classic `NeRF` model used a ReLU density activation that
