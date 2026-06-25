@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mlx3d"
-version = "0.2.0"
+version = "0.3.0"
 description = "Differentiable 3D computer vision on Apple Silicon, built on MLX"
 authors = [{ name = "AmirHossein Razlighi", email = "arazlighi@gmail.com" }]
 license = { text = "MIT" }

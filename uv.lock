@@ -486,7 +486,7 @@ wheels = [
 
 [[package]]
 name = "mlx3d"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "mlx", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },

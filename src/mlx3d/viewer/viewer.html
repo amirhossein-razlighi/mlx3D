@@ -4,46 +4,90 @@
 <meta charset="utf-8">
 <title>MLX3D Viewer</title>
 <style>
-  :root { color-scheme: dark; }
+  :root { color-scheme: dark; --ink: #cfcfe0; --accent: #9d8cff; --panel: rgba(15, 15, 22, 0.78); }
   html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0b0f;
                font-family: -apple-system, "SF Pro Text", Helvetica, sans-serif; }
   #view { width: 100%; height: 100%; display: block; cursor: grab;
           touch-action: none; image-rendering: auto; }
   #view.dragging { cursor: grabbing; }
-  .hud { position: fixed; padding: 8px 12px; border-radius: 10px;
-         background: rgba(15, 15, 22, 0.72); backdrop-filter: blur(12px);
-         color: #cfcfe0; font-size: 12px; line-height: 1.55; user-select: none; }
+  .hud { position: fixed; padding: 8px 12px; border-radius: 10px; background: var(--panel);
+         backdrop-filter: blur(12px); color: var(--ink); font-size: 12px; line-height: 1.55;
+         user-select: none; }
   #stats { top: 12px; left: 12px; }
   #stats b { color: #fff; font-size: 13px; }
-  #help { bottom: 12px; left: 12px; max-width: 280px; }
+  #badge { top: 12px; right: 12px; color: var(--accent); font-weight: 600; }
+
+  /* Control panel ------------------------------------------------------ */
+  #panel { top: 44px; right: 12px; width: 224px; padding: 10px 12px 12px;
+           max-height: calc(100% - 120px); overflow-y: auto; }
+  #panel h4 { margin: 4px 0 8px; font-size: 11px; letter-spacing: .08em;
+              text-transform: uppercase; color: #8a8aa0; }
+  #panel.collapsed .body { display: none; }
+  #panel .head { display: flex; justify-content: space-between; align-items: center;
+                 cursor: pointer; }
+  #panel .head b { color: #fff; }
+  .row { margin: 9px 0; }
+  .row label { display: flex; justify-content: space-between; font-size: 11px;
+               color: #b9b9cc; margin-bottom: 3px; }
+  .row label .val { color: var(--accent); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); height: 4px; }
+  input[type=color] { width: 100%; height: 24px; border: 0; background: none; padding: 0;
+                      border-radius: 6px; cursor: pointer; }
+  select { width: 100%; background: #1b1b27; color: var(--ink); border: 1px solid #2c2c3c;
+           border-radius: 6px; padding: 4px; font: inherit; }
+  .seg { display: flex; flex-wrap: wrap; gap: 4px; }
+  .seg button, .btn { appearance: none; border: 0; border-radius: 6px; padding: 5px 8px;
+                      background: #1f1f2c; color: var(--ink); font: inherit; font-size: 11px;
+                      cursor: pointer; }
+  .seg button.active { background: var(--accent); color: #09090d; font-weight: 700; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  .actions { display: flex; gap: 6px; margin-top: 10px; }
+  .actions .btn { flex: 1; text-align: center; }
+  .btn:hover, .seg button:hover { filter: brightness(1.2); }
+
+  #gizmo { position: fixed; bottom: 12px; right: 12px; width: 76px; height: 76px; }
+  #help { bottom: 12px; left: 12px; max-width: 300px; }
   #help kbd { background: #2a2a38; border-radius: 4px; padding: 0 5px;
               font-family: ui-monospace, monospace; font-size: 11px; }
-  #badge { top: 12px; right: 12px; color: #9d8cff; font-weight: 600; }
-  #modes { top: 48px; right: 12px; display: none; padding: 6px; }
-  #modes button { appearance: none; border: 0; border-radius: 6px; padding: 5px 8px;
-                  background: transparent; color: #cfcfe0; font: inherit; cursor: pointer; }
-  #modes button.active { background: #9d8cff; color: #09090d; font-weight: 700; }
   #spinner { position: fixed; top: 16px; right: 130px; width: 10px; height: 10px;
-             border-radius: 50%; background: #9d8cff; opacity: 0;
-             transition: opacity .2s; }
+             border-radius: 50%; background: var(--accent); opacity: 0; transition: opacity .2s; }
   #spinner.busy { opacity: 1; animation: pulse 1s infinite; }
   @keyframes pulse { 50% { transform: scale(0.4); opacity: .4; } }
-  #err { top: 50%; left: 50%; transform: translate(-50%, -50%);
-         color: #ff7b7b; display: none; }
+  #err { top: 50%; left: 50%; transform: translate(-50%, -50%); color: #ff7b7b; display: none; }
 </style>
 </head>
 <body>
 <canvas id="view"></canvas>
 <div class="hud" id="stats"><b>MLX3D</b><br><span id="statline">connecting…</span></div>
+<div class="hud" id="badge">mlx3d</div>
+
+<div class="hud" id="panel">
+  <div class="head" onclick="togglePanel()"><b>Controls</b><span id="panelToggle">▾</span></div>
+  <div class="body">
+    <div id="modes" class="row"></div>
+    <div id="controls"></div>
+    <h4>View</h4>
+    <div class="grid3" id="presets"></div>
+    <div class="row">
+      <label>Max resolution <span class="val" id="resVal"></span></label>
+      <input type="range" id="resSlider" min="0.25" max="1" step="0.25">
+    </div>
+    <div class="actions">
+      <button class="btn" onclick="saveScreenshot()">⤓ PNG</button>
+      <button class="btn" onclick="copyCamera()">⧉ Camera</button>
+      <button class="btn" onclick="resetCamera(); dirty = true;">⟲ Reset</button>
+    </div>
+  </div>
+</div>
+
+<canvas class="hud" id="gizmo" width="152" height="152"></canvas>
 <div class="hud" id="help">
   <b>Controls</b><br>
   drag — orbit &nbsp;·&nbsp; <kbd>shift</kbd>+drag / right-drag — pan<br>
   scroll / pinch — zoom &nbsp;·&nbsp; <kbd>R</kbd> reset &nbsp;·&nbsp; <kbd>U</kbd> flip up<br>
-  <kbd>D</kbd> depth / rgb &nbsp;·&nbsp; <kbd>M</kbd> mesh / rgb &nbsp;·&nbsp; <kbd>H</kbd> help<br>
-  <kbd>[</kbd> <kbd>]</kbd> quality
+  <kbd>1</kbd>–<kbd>9</kbd> display mode &nbsp;·&nbsp; <kbd>C</kbd> panel &nbsp;·&nbsp; <kbd>H</kbd> help<br>
+  <kbd>P</kbd> screenshot &nbsp;·&nbsp; <kbd>[</kbd> <kbd>]</kbd> quality
 </div>
-<div class="hud" id="badge">mlx3d</div>
-<div class="hud" id="modes"></div>
 <div id="spinner"></div>
 <div class="hud" id="err"></div>
 
@@ -55,12 +99,18 @@ const statline = document.getElementById("statline");
 const spinner = document.getElementById("spinner");
 const errBox = document.getElementById("err");
 const modesEl = document.getElementById("modes");
+const controlsEl = document.getElementById("controls");
+const presetsEl = document.getElementById("presets");
+const gizmo = document.getElementById("gizmo");
+const gctx = gizmo.getContext("2d");
+const STORE_KEY = "mlx3d.viewer." + location.port;
 
 // ----------------------------------------------------------- camera state
 const home = { theta: 0.6, phi: 0.3, radius: 4.0, target: [0, 0, 0], fov: 60 };
 let cam = null;
-let upSign = 1, resScale = 1.0, maxScale = 1.0, dirty = true, info = {};
-let viewMode = "rgb";
+let upSign = 1, maxScale = 1.0, dirty = true, info = {};
+let viewMode = "rgb", displayModes = ["rgb"];
+let controlValues = {};
 let lastFrameMs = 0, shownW = 0, shownH = 0;
 let lastRevision = null, infoPoll = null;
 
@@ -71,40 +121,50 @@ function resetCamera() {
 }
 resetCamera();
 
+// --------------------------------------------------------- persisted state
+function saveState() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(
+      { cam, upSign, viewMode, maxScale, controlValues }));
+  } catch (e) {}
+}
+function loadState() {
+  try {
+    const s = JSON.parse(localStorage.getItem(STORE_KEY) || "null");
+    if (!s) return false;
+    if (s.cam) cam = s.cam;
+    if (s.upSign) upSign = s.upSign;
+    if (s.viewMode) viewMode = s.viewMode;
+    if (s.maxScale) maxScale = s.maxScale;
+    if (s.controlValues) controlValues = s.controlValues;
+    return true;
+  } catch (e) { return false; }
+}
+
+// ----------------------------------------------------------------- /info
 function applyInfo(meta, initial = false) {
   const prevRevision = info.revision;
   info = meta;
   if (initial) {
-    if (meta.radius) home.radius = meta.radius;
-    if (meta.target) home.target = meta.target;
-    if (meta.fov) home.fov = meta.fov;
-    resetCamera();
+    const restored = loadState();
+    if (!restored) {
+      if (meta.radius) home.radius = meta.radius;
+      if (meta.target) home.target = meta.target;
+      if (meta.fov) home.fov = meta.fov;
+      resetCamera();
+      if (meta.heavy) maxScale = 0.5;        // NeRF: half resolution by default
+      if (meta.max_scale) maxScale = clamp(Number(meta.max_scale), 0.1, 1.0);
+    }
+    displayModes = meta.display_modes || ["rgb"];
+    if (!displayModes.includes(viewMode)) viewMode = "rgb";
+    buildControls(meta.controls || []);
+    buildPresets();
+    buildModeButtons();
+    document.getElementById("resSlider").value = maxScale;
+    document.getElementById("resVal").textContent = Math.round(maxScale * 100) + "%";
   }
-  if (initial && meta.heavy) maxScale = 0.5;   // NeRF: render at half resolution by default
-  if (initial && meta.max_scale) maxScale = Math.max(0.1, Math.min(1.0, Number(meta.max_scale)));
-  if (initial) updateModeButtons(meta.display_modes || ["rgb"]);
   if (!initial && meta.revision !== undefined && meta.revision !== prevRevision) dirty = true;
   updateStats();
-}
-
-function updateModeButtons(modes) {
-  if (!modes || modes.length <= 1) {
-    modesEl.style.display = "none";
-    return;
-  }
-  modesEl.style.display = "";
-  modesEl.innerHTML = "";
-  modes.forEach(mode => {
-    const button = document.createElement("button");
-    button.textContent = mode;
-    button.className = mode === viewMode ? "active" : "";
-    button.onclick = () => {
-      viewMode = mode;
-      updateModeButtons(modes);
-      dirty = true;
-    };
-    modesEl.appendChild(button);
-  });
 }
 
 async function fetchInfo(initial = false) {
@@ -116,28 +176,109 @@ async function fetchInfo(initial = false) {
   }
 }
 
-fetchInfo(true).catch(() => {});
+// ----------------------------------------------------- control panel build
+function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
 
-// camera basis for panning (matches the server's spherical convention)
+function buildModeButtons() {
+  modesEl.innerHTML = "";
+  if (displayModes.length <= 1) return;
+  const seg = document.createElement("div");
+  seg.className = "seg";
+  displayModes.forEach((mode, i) => {
+    const b = document.createElement("button");
+    b.textContent = mode;
+    b.className = mode === viewMode ? "active" : "";
+    b.title = "key " + (i + 1);
+    b.onclick = () => { viewMode = mode; buildModeButtons(); dirty = true; saveState(); };
+    seg.appendChild(b);
+  });
+  modesEl.appendChild(seg);
+}
+
+function buildControls(controls) {
+  controlsEl.innerHTML = "";
+  if (controls.length) {
+    const h = document.createElement("h4"); h.textContent = "Render"; controlsEl.appendChild(h);
+  }
+  controls.forEach(c => {
+    if (!(c.name in controlValues)) controlValues[c.name] = c.value;
+    const row = document.createElement("div"); row.className = "row";
+    if (c.kind === "slider") {
+      const lab = document.createElement("label");
+      const v = document.createElement("span"); v.className = "val";
+      lab.textContent = c.label + " "; lab.appendChild(v);
+      const inp = document.createElement("input");
+      inp.type = "range"; inp.min = c.min; inp.max = c.max; inp.step = c.step;
+      inp.value = controlValues[c.name];
+      const fmt = () => { v.textContent = (+inp.value).toFixed(c.step < 1 ? 2 : 0); };
+      fmt();
+      inp.oninput = () => { controlValues[c.name] = +inp.value; fmt(); dirty = true; };
+      inp.onchange = saveState;
+      row.appendChild(lab); row.appendChild(inp);
+    } else if (c.kind === "color") {
+      const lab = document.createElement("label"); lab.textContent = c.label;
+      const inp = document.createElement("input");
+      inp.type = "color"; inp.value = controlValues[c.name];
+      inp.oninput = () => { controlValues[c.name] = inp.value; dirty = true; };
+      inp.onchange = saveState;
+      row.appendChild(lab); row.appendChild(inp);
+    } else if (c.kind === "select") {
+      const lab = document.createElement("label"); lab.textContent = c.label;
+      const sel = document.createElement("select");
+      (c.options || []).forEach(o => {
+        const opt = document.createElement("option"); opt.value = o; opt.textContent = o;
+        if (o === controlValues[c.name]) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      sel.onchange = () => { controlValues[c.name] = sel.value; dirty = true; saveState(); };
+      row.appendChild(lab); row.appendChild(sel);
+    }
+    controlsEl.appendChild(row);
+  });
+}
+
+const PRESETS = {
+  front: [0, 0], back: [Math.PI, 0], left: [-Math.PI / 2, 0], right: [Math.PI / 2, 0],
+  top: [0, 1.5], iso: [0.7, 0.5],
+};
+function buildPresets() {
+  presetsEl.innerHTML = "";
+  Object.keys(PRESETS).forEach(name => {
+    const b = document.createElement("button");
+    b.textContent = name;
+    b.onclick = () => { cam.theta = PRESETS[name][0]; cam.phi = PRESETS[name][1];
+                        dirty = true; saveState(); };
+    presetsEl.appendChild(b);
+  });
+}
+
+function togglePanel() { document.getElementById("panel").classList.toggle("collapsed");
+  document.getElementById("panelToggle").textContent =
+    document.getElementById("panel").classList.contains("collapsed") ? "▸" : "▾"; }
+
+document.getElementById("resSlider").oninput = e => {
+  maxScale = +e.target.value;
+  document.getElementById("resVal").textContent = Math.round(maxScale * 100) + "%";
+  dirty = true; saveState();
+};
+
+// ----------------------------------------------- camera basis (matches server)
 function basis() {
   const ct = Math.cos(cam.theta), st = Math.sin(cam.theta);
   const cp = Math.cos(cam.phi), sp = Math.sin(cam.phi);
-  const fwd = [-cp * st, -upSign * sp, -cp * ct];           // target - eye, normalized
+  const fwd = [-cp * st, -upSign * sp, -cp * ct];
   const up = [0, upSign, 0];
-  let right = [fwd[1] * up[2] - fwd[2] * up[1],
-               fwd[2] * up[0] - fwd[0] * up[2],
+  let right = [fwd[1] * up[2] - fwd[2] * up[1], fwd[2] * up[0] - fwd[0] * up[2],
                fwd[0] * up[1] - fwd[1] * up[0]];
   const rl = Math.hypot(...right) || 1;
   right = right.map(v => v / rl);
-  const upv = [right[1] * fwd[2] - right[2] * fwd[1],
-               right[2] * fwd[0] - right[0] * fwd[2],
+  const upv = [right[1] * fwd[2] - right[2] * fwd[1], right[2] * fwd[0] - right[0] * fwd[2],
                right[0] * fwd[1] - right[1] * fwd[0]];
-  return { right, upv };
+  return { right, upv, fwd };
 }
 
 // ------------------------------------------------------------ interaction
 let dragging = false, panning = false, lastX = 0, lastY = 0, interactT = 0;
-
 function markInteract() { interactT = performance.now(); dirty = true; }
 
 canvas.addEventListener("pointerdown", e => {
@@ -148,9 +289,7 @@ canvas.addEventListener("pointerdown", e => {
   canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener("pointerup", e => {
-  dragging = false;
-  canvas.classList.remove("dragging");
-  markInteract();
+  dragging = false; canvas.classList.remove("dragging"); markInteract(); saveState();
 });
 canvas.addEventListener("pointermove", e => {
   if (!dragging) return;
@@ -159,53 +298,76 @@ canvas.addEventListener("pointermove", e => {
   if (panning) {
     const { right, upv } = basis();
     const k = cam.radius * 0.0016;
-    for (let i = 0; i < 3; i++)
-      cam.target[i] += (-dx * right[i] + dy * upv[i]) * k;
+    for (let i = 0; i < 3; i++) cam.target[i] += (-dx * right[i] + dy * upv[i]) * k;
   } else {
     cam.theta -= dx * 0.005;
-    cam.phi = Math.min(1.55, Math.max(-1.55, cam.phi + dy * 0.005));
+    cam.phi = clamp(cam.phi + dy * 0.005, -1.55, 1.55);
   }
   markInteract();
 });
 canvas.addEventListener("wheel", e => {
   e.preventDefault();
-  cam.radius *= Math.exp(e.deltaY * 0.0012);
-  cam.radius = Math.max(0.01, Math.min(1e4, cam.radius));
-  markInteract();
+  cam.radius = clamp(cam.radius * Math.exp(e.deltaY * 0.0012), 0.01, 1e4);
+  markInteract(); saveState();
 }, { passive: false });
 canvas.addEventListener("contextmenu", e => e.preventDefault());
 
 window.addEventListener("keydown", e => {
-  if (e.key === "r" || e.key === "R") { resetCamera(); }
-  else if (e.key === "u" || e.key === "U") { upSign = -upSign; dirty = true; }
-  else if (e.key === "h" || e.key === "H") {
+  const k = e.key;
+  if (k >= "1" && k <= "9") {
+    const idx = +k - 1;
+    if (idx < displayModes.length) { viewMode = displayModes[idx]; buildModeButtons(); dirty = true; saveState(); }
+  } else if (k === "r" || k === "R") resetCamera();
+  else if (k === "u" || k === "U") { upSign = -upSign; dirty = true; saveState(); }
+  else if (k === "c" || k === "C") togglePanel();
+  else if (k === "p" || k === "P") saveScreenshot();
+  else if (k === "h" || k === "H") {
     const el = document.getElementById("help");
     el.style.display = el.style.display === "none" ? "" : "none";
   }
-  else if (e.key === "d" || e.key === "D") {
-    const modes = info.display_modes || ["rgb"];
-    if (modes.includes("depth")) viewMode = viewMode === "depth" ? "rgb" : "depth";
-    updateModeButtons(modes);
-    dirty = true;
-  }
-  else if (e.key === "m" || e.key === "M") {
-    const modes = info.display_modes || ["rgb"];
-    if (modes.includes("mesh")) viewMode = viewMode === "mesh" ? "rgb" : "mesh";
-    updateModeButtons(modes);
-    dirty = true;
-  }
-  else if (e.key === "[") { maxScale = Math.max(0.25, maxScale - 0.25); dirty = true; }
-  else if (e.key === "]") { maxScale = Math.min(1.0, maxScale + 0.25); dirty = true; }
+  else if (k === "[") { maxScale = Math.max(0.25, maxScale - 0.25); document.getElementById("resSlider").value = maxScale; document.getElementById("resVal").textContent = Math.round(maxScale*100)+"%"; dirty = true; }
+  else if (k === "]") { maxScale = Math.min(1.0, maxScale + 0.25); document.getElementById("resSlider").value = maxScale; document.getElementById("resVal").textContent = Math.round(maxScale*100)+"%"; dirty = true; }
 });
+
+// ---------------------------------------------------------- query builder
+function camParams(w, h) {
+  const p = new URLSearchParams({
+    theta: cam.theta.toFixed(5), phi: cam.phi.toFixed(5), radius: cam.radius.toFixed(5),
+    tx: cam.target[0].toFixed(5), ty: cam.target[1].toFixed(5), tz: cam.target[2].toFixed(5),
+    fov: cam.fov, w, h, up: upSign, mode: viewMode,
+  });
+  for (const [name, value] of Object.entries(controlValues)) p.set(name, value);
+  return p;
+}
+
+// ------------------------------------------------------- screenshot / camera
+async function saveScreenshot() {
+  const p = camParams(canvas.width, canvas.height);
+  try {
+    const resp = await fetch("/screenshot?" + p.toString());
+    if (!resp.ok) throw new Error(await resp.text());
+    const url = URL.createObjectURL(await resp.blob());
+    const a = document.createElement("a");
+    a.href = url; a.download = "mlx3d_" + Date.now() + ".png";
+    a.click(); URL.revokeObjectURL(url);
+  } catch (err) { flashError("screenshot failed: " + err.message); }
+}
+function copyCamera() {
+  const json = JSON.stringify({ theta: cam.theta, phi: cam.phi, radius: cam.radius,
+                                target: cam.target, fov: cam.fov, up: upSign }, null, 0);
+  navigator.clipboard?.writeText(json).then(
+    () => flashStat("camera copied"), () => flashError("clipboard blocked"));
+}
+function flashError(msg) { errBox.textContent = msg; errBox.style.display = "block";
+  setTimeout(() => errBox.style.display = "none", 1800); }
+function flashStat(msg) { statline.textContent = msg; setTimeout(updateStats, 1200); }
 
 // ---------------------------------------------------------- render loop
 function fitCanvas() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const w = Math.round(canvas.clientWidth * dpr);
   const h = Math.round(canvas.clientHeight * dpr);
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w; canvas.height = h; dirty = true;
-  }
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; dirty = true; }
 }
 window.addEventListener("resize", () => { fitCanvas(); dirty = true; });
 
@@ -213,32 +375,20 @@ async function frameLoop() {
   fitCanvas();
   for (;;) {
     const interacting = dragging || performance.now() - interactT < 250;
-    if (!dirty && !interacting) {            // idle: stop rendering, save the GPU
-      await new Promise(r => setTimeout(r, 30));
-      continue;
-    }
-    // Adaptive resolution: drop while interacting, full when settled.
+    if (!dirty && !interacting) { await new Promise(r => setTimeout(r, 30)); continue; }
     let scale = maxScale * (interacting ? 0.5 : 1.0);
     if (interacting && lastFrameMs > 80) scale *= 0.5;   // heavy scenes degrade more
     const w = Math.max(32, Math.round(canvas.width * scale));
     const h = Math.max(32, Math.round(canvas.height * scale));
     const q = interacting ? 70 : 90;
-
-    const p = new URLSearchParams({
-      theta: cam.theta.toFixed(5), phi: cam.phi.toFixed(5),
-      radius: cam.radius.toFixed(5),
-      tx: cam.target[0].toFixed(5), ty: cam.target[1].toFixed(5),
-      tz: cam.target[2].toFixed(5),
-      fov: cam.fov, w, h, q, up: upSign, mode: viewMode,
-    });
+    const p = camParams(w, h); p.set("q", q);
     dirty = false;
     spinner.classList.add("busy");
     const t0 = performance.now();
     try {
       const resp = await fetch("/render?" + p.toString());
       if (!resp.ok) throw new Error(await resp.text());
-      const blob = await resp.blob();
-      const bmp = await createImageBitmap(blob);
+      const bmp = await createImageBitmap(await resp.blob());
       ctx.imageSmoothingEnabled = true;
       ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
       bmp.close();
@@ -253,7 +403,37 @@ async function frameLoop() {
       dirty = true;
     }
     spinner.classList.remove("busy");
+    drawGizmo();
   }
+}
+
+// -------------------------------------------------------------- axis gizmo
+function drawGizmo() {
+  const { right, upv, fwd } = basis();
+  const W = gizmo.width, c = W / 2, len = W * 0.32;
+  gctx.clearRect(0, 0, W, W);
+  // Project each world axis onto the screen plane (right, -up).
+  const axes = [
+    { dir: [1, 0, 0], col: "#ff6b6b", lab: "X" },
+    { dir: [0, 1, 0], col: "#6bff95", lab: "Y" },
+    { dir: [0, 0, 1], col: "#6b9dff", lab: "Z" },
+  ].map(a => {
+    const sx = a.dir[0] * right[0] + a.dir[1] * right[1] + a.dir[2] * right[2];
+    const sy = a.dir[0] * upv[0] + a.dir[1] * upv[1] + a.dir[2] * upv[2];
+    const sz = a.dir[0] * fwd[0] + a.dir[1] * fwd[1] + a.dir[2] * fwd[2];
+    return { ...a, sx, sy: -sy, sz };
+  }).sort((p, q) => p.sz - q.sz);  // draw far axes first
+  for (const a of axes) {
+    const ex = c + a.sx * len, ey = c + a.sy * len;
+    gctx.strokeStyle = a.col; gctx.lineWidth = 2.4; gctx.globalAlpha = a.sz < 0 ? 0.5 : 1;
+    gctx.beginPath(); gctx.moveTo(c, c); gctx.lineTo(ex, ey); gctx.stroke();
+    gctx.fillStyle = a.col; gctx.globalAlpha = a.sz < 0 ? 0.55 : 1;
+    gctx.beginPath(); gctx.arc(ex, ey, 7, 0, 6.283); gctx.fill();
+    gctx.fillStyle = "#0b0b0f"; gctx.font = "bold 9px ui-monospace, monospace";
+    gctx.textAlign = "center"; gctx.textBaseline = "middle";
+    gctx.fillText(a.lab, ex, ey);
+  }
+  gctx.globalAlpha = 1;
 }
 
 function updateStats() {
@@ -261,15 +441,16 @@ function updateStats() {
   const parts = [`${fps} fps`, `${shownW}×${shownH}`];
   if (info.step !== undefined) parts.push(`iter ${info.step.toLocaleString()}`);
   if (info.loss !== undefined) parts.push(`loss ${Number(info.loss).toFixed(4)}`);
-  if (info.lr_means !== undefined) parts.push(`lr ${Number(info.lr_means).toExponential(1)}`);
   if (info.gaussians) parts.push(`${info.gaussians.toLocaleString()} gaussians`);
-  if (info.sh_degree !== undefined) parts.push(`SH ${info.sh_degree}`);
+  if (info.faces) parts.push(`${info.faces.toLocaleString()} faces`);
+  if (info.points) parts.push(`${info.points.toLocaleString()} points`);
   if (info.status) parts.push(info.status);
   if (info.mode) parts.push(info.mode);
   if (viewMode !== "rgb") parts.push(viewMode);
   statline.textContent = parts.join("  ·  ");
 }
 
+fetchInfo(true).catch(() => {});
 frameLoop();
 </script>
 </body>

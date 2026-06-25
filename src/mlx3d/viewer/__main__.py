@@ -1,7 +1,10 @@
-"""Command-line entry point: view a Gaussian Splatting checkpoint.
+"""Command-line entry point: view any MLX3D scene file.
 
-python -m mlx3d.viewer point_cloud.ply
-mlx3d-view point_cloud.ply --port 8090 --background 1 1 1
+The scene type is auto-detected from the file:
+
+    mlx3d-view point_cloud.ply        # 3DGS checkpoint, mesh, or point cloud
+    mlx3d-view bunny.obj              # mesh (OBJ / PLY / glTF / GLB)
+    mlx3d-view scene.ply --kind points --background 1 1 1
 """
 
 import argparse
@@ -10,16 +13,23 @@ import argparse
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="mlx3d-view",
-        description="Interactive viewer for 3DGS .ply checkpoints (Metal-accelerated).",
+        description="Interactive viewer for 3DGS checkpoints, meshes, and point clouds "
+        "(Metal-accelerated).",
     )
-    parser.add_argument("ply", type=str, help="path to a 3DGS-format .ply checkpoint")
+    parser.add_argument("path", type=str, help="path to a .ply / .obj / .gltf / .glb scene")
+    parser.add_argument(
+        "--kind",
+        choices=["gaussians", "mesh", "points"],
+        default=None,
+        help="override the auto-detected scene type",
+    )
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8090)
     parser.add_argument(
         "--background",
         type=float,
         nargs=3,
-        default=(0.0, 0.0, 0.0),
+        default=None,
         metavar=("R", "G", "B"),
         help="background color in [0, 1]",
     )
@@ -28,18 +38,16 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    from ..splatting import GaussianModel
-    from .server import view_gaussians
+    from .server import view_file
 
-    print(f"Loading {args.ply} ...")
-    model = GaussianModel.load_ply(args.ply)
-    print(f"{model.num_gaussians:,} gaussians, SH degree {model.sh_degree}")
-    view_gaussians(
-        model,
-        background=tuple(args.background),
+    print(f"Loading {args.path} ...")
+    view_file(
+        args.path,
+        kind=args.kind,
         host=args.host,
         port=args.port,
         open_browser=not args.no_browser,
+        background=tuple(args.background) if args.background is not None else None,
     )
 
 
