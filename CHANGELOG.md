@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `mlx3d-capture`: a one-command capture pipeline (photos directory or video
+  file → camera poses → 3D Gaussian Splatting with a live browser viewer → a
+  compacted `splat.ply`). Stages are cached and resumable; `--quality
+  fast/balanced/best` presets pick iterations, resolution, frame count and SH
+  degree. Python API in `mlx3d.capture` (`run_capture`, `CaptureConfig`).
+- Built-in COLMAP-free structure-from-motion (`mlx3d.capture.run_sfm`): SIFT +
+  ratio matching, essential-matrix initialization, incremental PnP-RANSAC
+  registration, filtered triangulation, and periodic sparse bundle adjustment
+  with shared-focal refinement (EXIF 35mm-equivalent prior when available).
+  Requires the new optional `[capture]` extra (OpenCV + SciPy). A thin COLMAP
+  CLI wrapper (`mlx3d.capture.run_colmap`) is preferred automatically when the
+  binary is installed.
+- Video ingestion for captures: ffmpeg-based even sampling with automatic
+  motion-blur filtering (sharpest frame per time bucket by variance of
+  Laplacian).
+- `GaussianTrainer.step` accepts an optional per-view SE(3) twist and returns
+  its gradient, enabling BARF-style joint pose refinement during training. The
+  capture pipeline turns this on automatically for built-in SfM poses and
+  exports the refined poses as a COLMAP model.
+- `save_colmap`: binary COLMAP sparse-model writer (inverse of `load_colmap`),
+  with intrinsics deduplication and PINHOLE/OPENCV/OPENCV_FISHEYE support.
+
 ## 0.2.1
 
 ### Added
