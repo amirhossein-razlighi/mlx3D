@@ -327,16 +327,17 @@ def _stage_train(out: str, images_dir: str, cfg: CaptureConfig, pose_info: dict,
 
     # Fold refined twists back into the cameras for eval and export.
     refined_cams = list(ds.cameras)
+    refined_sparse = None
     if twists is not None:
         refined_cams = [refine_camera(c, tw) for c, tw in zip(ds.cameras, twists)]
-        save_colmap(
+        refined_sparse = save_colmap(
             os.path.join(out, "refined"),
             refined_cams,
             ds.image_names,
             ds.points,
             ds.point_colors,
         )
-        log(f"Refined poses written to {os.path.join(out, 'refined', 'sparse', '0')}")
+        log(f"Refined poses written to {refined_sparse}")
 
     # Final eval renders on a few evenly spaced views.
     from PIL import Image
@@ -365,6 +366,7 @@ def _stage_train(out: str, images_dir: str, cfg: CaptureConfig, pose_info: dict,
         "gaussians": model.num_gaussians,
         "psnr_mean": mean_psnr,
         "pose_refined": bool(refine),
+        "refined_sparse": refined_sparse,
         "seconds": train_seconds,
         "checkpoint": os.path.join(out, "point_cloud.ply"),
     }
