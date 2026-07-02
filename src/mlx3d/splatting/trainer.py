@@ -12,7 +12,7 @@ import mlx.core as mx
 import mlx.optimizers as optim
 import numpy as np
 
-from ..cameras import Camera
+from ..cameras import Camera, refine_camera
 from ..losses import ssim
 from ..transforms import quaternion_to_matrix
 from .model import GaussianModel
@@ -316,8 +316,18 @@ class GaussianTrainer:
         return loss + geom_loss, (img, proj["radii"], geom_metrics)
 
     # -------------------------------------------------------------------- step
-    def step(self, camera: Camera, target: mx.array) -> dict[str, object]:
-        """One optimization step on a single view. Returns logging info."""
+    def step(
+        self, camera: Camera, target: mx.array, twist: mx.array | None = None
+    ) -> dict[str, object]:
+        """One optimization step on a single view. Returns logging info.
+
+        When ``twist`` (a 6D SE(3) Lie-algebra vector) is given, the view is
+        rendered through ``refine_camera(camera, twist)`` and the loss gradient
+        with respect to the twist is returned under ``info["twist_grad"]``.
+        Callers own the twist parameters and their optimizer, which enables
+        BARF-style joint pose refinement (one learnable twist per view) on top
+        of the standard splat optimization.
+        """
         self.step_count += 1
         cfg = self.config
         bg = mx.ones((3,)) if cfg.white_background else mx.zeros((3,))
@@ -326,15 +336,26 @@ class GaussianTrainer:
         densify_stats = None
         opacity_reset = False
         sh_degree_changed = False
+        twist_grad = None
 
-        def loss_fn(params, probe):
-            loss, aux = self._render_loss(params, probe, camera, target, bg)
-            return loss, aux
+        if twist is None:
 
-        (loss, (img, radii, geom_metrics)), grads = mx.value_and_grad(loss_fn, argnums=(0, 1))(
-            params, probe
-        )
-        param_grads, probe_grad = grads
+            def loss_fn(params, probe):
+                return self._render_loss(params, probe, camera, target, bg)
+
+            (loss, (img, radii, geom_metrics)), grads = mx.value_and_grad(
+                loss_fn, argnums=(0, 1)
+            )(params, probe)
+            param_grads, probe_grad = grads
+        else:
+
+            def loss_fn(params, probe, twist):
+                return self._render_loss(params, probe, refine_camera(camera, twist), target, bg)
+
+            (loss, (img, radii, geom_metrics)), grads = mx.value_and_grad(
+                loss_fn, argnums=(0, 1, 2)
+            )(params, probe, twist)
+            param_grads, probe_grad, twist_grad = grads
 
         for k, opt in self.optimizers.items():
             self.model.params[k] = opt.apply_gradients(
@@ -418,4 +439,5 @@ class GaussianTrainer:
             "opacity_reset": opacity_reset,
             "sh_degree_changed": sh_degree_changed,
             "geometry": {k: float(v) for k, v in geom_metrics.items()},
+            "twist_grad": twist_grad,
         }
