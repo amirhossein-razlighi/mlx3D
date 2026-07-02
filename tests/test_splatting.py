@@ -870,3 +870,48 @@ def test_trainer_max_gaussians_cap():
     capped = [c for c in counts if c >= 45]
     if len(capped) >= 2:
         assert capped[-1] <= capped[0]
+
+
+def test_trainer_step_pose_refinement_recovers_perturbed_pose():
+    """With frozen splats, twist gradients from step() recover a perturbed pose."""
+    import mlx.optimizers as optim
+
+    from mlx3d.cameras import refine_camera
+
+    mx.random.seed(3)
+    true_cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), width=48, height=48, fov=60.0)
+    pts = mx.random.normal((60, 3)) * 0.5
+    colors = mx.random.uniform(shape=(60, 3))
+    model = GaussianModel.from_points(pts, colors, sh_degree=0)
+    target = model.render(true_cam)["image"]
+
+    # Freeze the splats so only the pose can explain the loss.
+    frozen = TrainerConfig(
+        lr_means=0.0,
+        lr_scales=0.0,
+        lr_quats=0.0,
+        lr_opacities=0.0,
+        lr_sh_dc=0.0,
+        lr_sh_rest=0.0,
+        densify_from=10_000,
+        opacity_reset_every=10_000,
+        sh_increase_every=10_000,
+    )
+    trainer = GaussianTrainer(model, frozen)
+    perturbed = refine_camera(true_cam, mx.array([0.03, -0.02, 0.0, 0.02, -0.015, 0.01]))
+
+    twist = mx.zeros((6,))
+    opt = optim.Adam(learning_rate=5e-3)
+    losses = []
+    for _ in range(60):
+        info = trainer.step(perturbed, target, twist=twist)
+        assert info["twist_grad"] is not None
+        twist = opt.apply_gradients({"twist": info["twist_grad"]}, {"twist": twist})["twist"]
+        mx.eval(twist)
+        losses.append(info["loss"])
+    assert np.isfinite(losses).all()
+    assert losses[-1] < 0.5 * losses[0]  # pose optimization clearly reduces the loss
+
+    # Without a twist the info key is present but empty (backwards compatible).
+    info = trainer.step(perturbed, target)
+    assert info["twist_grad"] is None
