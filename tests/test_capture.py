@@ -209,8 +209,7 @@ def _render_corner_scene(img_dir, views=12, size=320, seed=0):
         for octave in (2, 5, 11, 23, 47):
             for c in range(3):
                 col[:, c] += octave**-0.5 * np.sin(
-                    2 * np.pi * octave * (uv @ rng.uniform(0.5, 1.5, 2))
-                    + rng.uniform(0, 2 * np.pi)
+                    2 * np.pi * octave * (uv @ rng.uniform(0.5, 1.5, 2)) + rng.uniform(0, 2 * np.pi)
                 )
         col = (col - col.min()) / (np.ptp(col) + 1e-9)
         a, b = uv[:, 0] * 2 - 1, uv[:, 1] * 2 - 1
@@ -285,11 +284,43 @@ def test_builtin_sfm_recovers_synthetic_poses(tmp_path):
     rot_errs = []
     for cam, name in zip(ds.cameras, ds.image_names):
         R_delta = np.array(gt[name].R) @ (np.array(cam.R) @ R_align).T
-        rot_errs.append(
-            np.degrees(np.arccos(np.clip((np.trace(R_delta) - 1) / 2, -1, 1)))
-        )
+        rot_errs.append(np.degrees(np.arccos(np.clip((np.trace(R_delta) - 1) / 2, -1, 1))))
     assert np.mean(rot_errs) < 3.0  # degrees
 
     # Focal refinement pulls the 1.2*dim prior toward the true focal.
     true_f = gt[ds.image_names[0]].fx
     assert abs(ds.cameras[0].fx - true_f) / true_f < 0.05
+
+
+# ------------------------------------------------------------------- pipeline
+def test_capture_cli_parser_defaults():
+    from mlx3d.cli.capture import _default_out, build_parser
+
+    args = build_parser().parse_args(["walk.mp4", "--quality", "fast", "--no-viewer"])
+    assert args.quality == "fast" and args.no_viewer
+    assert _default_out("clips/walk.mp4") == os.path.join("captures", "walk")
+    assert _default_out("./my_photos/") == os.path.join("captures", "my_photos")
+
+
+def test_run_capture_end_to_end_builtin_poses(tmp_path):
+    """Photos -> built-in SfM -> short 3DGS training -> compacted splat.ply."""
+    pytest.importorskip("cv2")
+    pytest.importorskip("scipy")
+    from mlx3d.capture import CaptureConfig, run_capture
+
+    img_dir = str(tmp_path / "photos")
+    _render_corner_scene(img_dir, views=10, size=256, seed=1)
+    out = str(tmp_path / "cap")
+    cfg = CaptureConfig(quality="fast", poses="builtin", viewer=False, iters=150, save_every=0)
+    summary = run_capture(img_dir, out, cfg, log=lambda *_: None)
+
+    assert os.path.exists(os.path.join(out, "splat.ply"))
+    assert os.path.exists(os.path.join(out, "capture.json"))
+    train = summary["stages"]["train"]
+    assert train["pose_refined"] is True  # auto-on for built-in SfM poses
+    assert train["psnr_mean"] > 18.0
+    # Refined poses are exported alongside the originals.
+    assert os.path.exists(os.path.join(out, "refined", "sparse", "0", "images.bin"))
+    # Re-running resumes: the pose stage is reused, not recomputed.
+    summary2 = run_capture(img_dir, out, cfg, log=lambda *_: None)
+    assert summary2["stages"]["poses"]["method"] == "existing"

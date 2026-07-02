@@ -9,9 +9,12 @@ from .frames import (
     select_sharpest,
     sharpness_score,
 )
+from .pipeline import QUALITY_PRESETS, CaptureConfig, run_capture
 from .sfm import SfmConfig, SfmResult, run_sfm
 
 __all__ = [
+    "CaptureConfig",
+    "QUALITY_PRESETS",
     "SfmConfig",
     "SfmResult",
     "estimate_focal_px",
@@ -19,6 +22,7 @@ __all__ = [
     "has_colmap",
     "is_video",
     "list_images",
+    "run_capture",
     "run_colmap",
     "run_sfm",
     "select_sharpest",
