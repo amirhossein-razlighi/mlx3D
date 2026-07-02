@@ -90,6 +90,19 @@ uv run pytest tests/
 uv run mkdocs serve   # docs at http://127.0.0.1:8000
 ```
 
+Prefer plain pip? The package installs editable with the standard dev extra:
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+pytest
+```
+
+> [!NOTE]
+> `uv`-created `.venv`s do not ship their own `pip`. Inside one, use
+> `uv pip ...` (or `uv run ...`); a bare `pip` may resolve to a different
+> Python and silently install into the wrong environment.
+
 Contributions are welcome — file an issue to get started.
 
 ## License
