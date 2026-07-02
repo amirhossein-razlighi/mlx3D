@@ -343,9 +343,9 @@ class GaussianTrainer:
             def loss_fn(params, probe):
                 return self._render_loss(params, probe, camera, target, bg)
 
-            (loss, (img, radii, geom_metrics)), grads = mx.value_and_grad(
-                loss_fn, argnums=(0, 1)
-            )(params, probe)
+            (loss, (img, radii, geom_metrics)), grads = mx.value_and_grad(loss_fn, argnums=(0, 1))(
+                params, probe
+            )
             param_grads, probe_grad = grads
         else:
 
