@@ -4,6 +4,14 @@
 
 # MLX3D
 
+<p align="center">
+  <a href="https://pypi.org/project/mlx3d/"><img alt="PyPI" src="https://img.shields.io/pypi/v/mlx3d.svg?color=6f42c1"></a>
+  <a href="https://pypi.org/project/mlx3d/"><img alt="Python" src="https://img.shields.io/pypi/pyversions/mlx3d.svg"></a>
+  <a href="https://github.com/amirhossein-razlighi/mlx3D/actions/workflows/tests.yml"><img alt="Tests" src="https://github.com/amirhossein-razlighi/mlx3D/actions/workflows/tests.yml/badge.svg"></a>
+  <a href="https://amirhossein-razlighi.github.io/mlx3D/"><img alt="Docs" src="https://img.shields.io/badge/docs-mkdocs-blue"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
+</p>
+
 **Differentiable 3D computer vision on Apple Silicon, built on [MLX](https://github.com/ml-explore/mlx).**
 
 MLX3D brings the PyTorch3D workflow to Macs: batched 3D data structures, cameras, differentiable rendering, and modern view synthesis — NeRF and **3D Gaussian Splatting with custom Metal kernels** — running natively on the Apple GPU.
@@ -39,6 +47,12 @@ with one command, entirely on your Mac:
 ```bash
 mlx3d-capture ./my_photos/          # or: mlx3d-capture walkaround.mp4
 ```
+
+<p align="center">
+  <img src="./docs/assets/capture_castle.jpg" width="90%" alt="Left: one of 11 input photos. Right: the trained 3D Gaussian Splat rendered from the same viewpoint." />
+  <br/>
+  <em>11 photos in, splat out — input photo (left) vs. the trained splat (right), poses from the built-in COLMAP-free SfM, ~5 minutes on an M-series laptop.</em>
+</p>
 
 This runs the whole pipeline: frame extraction (with automatic motion-blur
 filtering for video) → camera poses → 3DGS training with a **live browser
@@ -83,6 +97,31 @@ mlx3d-compact outputs/gs/point_cloud.ply --out point_cloud_small.ply --max-gauss
 ```
 
 More in the docs: [mesh optimization](https://amirhossein-razlighi.github.io/mlx3D/tutorials/mesh_optimization/), [point cloud fitting](https://amirhossein-razlighi.github.io/mlx3D/tutorials/pointcloud_fitting/), [NeRF](https://amirhossein-razlighi.github.io/mlx3D/tutorials/nerf/), [Gaussian Splatting](https://amirhossein-razlighi.github.io/mlx3D/tutorials/gaussian_splatting/).
+
+## Gallery
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="./docs/assets/v020_truck_render_hi.png" alt="3D Gaussian Splatting render of the Tanks & Temples truck scene" /><br/>
+      <em>3D Gaussian Splatting (Tanks&nbsp;&amp;&nbsp;Temples truck), Metal rasterizer</em>
+    </td>
+    <td align="center" width="50%">
+      <img src="./docs/assets/v020_truck_normals_hi.png" alt="Rendered normals of the truck scene" /><br/>
+      <em>The same splat rendered as normals — any per-Gaussian feature works</em>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="./docs/assets/v020_lego_ngp.png" alt="Hash-grid NeRF render of the Lego scene" /><br/>
+      <em>Instant-NGP-style hash-grid NeRF (Blender Lego)</em>
+    </td>
+    <td align="center" width="50%">
+      <img src="./docs/assets/render_lit_sphere.png" alt="Lit mesh render" /><br/>
+      <em>Differentiable mesh rendering with Phong shading</em>
+    </td>
+  </tr>
+</table>
 
 ## Examples
 
@@ -129,7 +168,8 @@ pytest
 > `uv pip ...` (or `uv run ...`); a bare `pip` may resolve to a different
 > Python and silently install into the wrong environment.
 
-Contributions are welcome — file an issue to get started.
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the
+workflow and guidelines, or file an issue to get started.
 
 ## License
 
