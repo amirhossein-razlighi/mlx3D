@@ -39,6 +39,12 @@ dependencies = [
 #   * dependency-groups (PEP 735)   -> `uv sync` installs it automatically
 # Keep the two lists in sync.
 [project.optional-dependencies]
+capture = [
+  # Built-in COLMAP-free SfM for `mlx3d-capture` (feature matching + bundle
+  # adjustment). Not needed when the COLMAP binary is installed.
+  "opencv-python>=4.8",
+  "scipy>=1.11",
+]
 dev = [
   "pytest>=8.0",
   "ruff>=0.5",

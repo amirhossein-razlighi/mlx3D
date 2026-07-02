@@ -193,3 +193,103 @@ def test_extract_video_frames(tmp_path):
     from mlx3d.capture import list_images
 
     assert list_images(str(tmp_path / "frames")) == frames
+
+
+# ------------------------------------------------------------------ built-in SfM
+def _render_corner_scene(img_dir, views=12, size=320, seed=0):
+    """Render a textured 'room corner' with known poses; returns {name: Camera}."""
+    from mlx3d.splatting import GaussianModel
+
+    mx.random.seed(seed)
+    rng = np.random.default_rng(seed)
+    planes, colors = [], []
+    for k in range(3):
+        uv = rng.uniform(size=(8000, 2))
+        col = np.zeros((8000, 3))
+        for octave in (2, 5, 11, 23, 47):
+            for c in range(3):
+                col[:, c] += octave**-0.5 * np.sin(
+                    2 * np.pi * octave * (uv @ rng.uniform(0.5, 1.5, 2))
+                    + rng.uniform(0, 2 * np.pi)
+                )
+        col = (col - col.min()) / (np.ptp(col) + 1e-9)
+        a, b = uv[:, 0] * 2 - 1, uv[:, 1] * 2 - 1
+        if k == 0:
+            xyz = np.stack([a, np.ones_like(a), b], axis=1)  # floor
+        elif k == 1:
+            xyz = np.stack([a, b, -np.ones_like(a)], axis=1)  # back wall
+        else:
+            xyz = np.stack([-np.ones_like(a), a, b], axis=1)  # side wall
+        planes.append(xyz)
+        colors.append(col)
+    model = GaussianModel.from_points(
+        mx.array(np.concatenate(planes).astype(np.float32)),
+        mx.array(np.concatenate(colors).astype(np.float32)),
+        sh_degree=0,
+    )
+    model.params["scales"] = mx.full(model.params["scales"].shape, np.log(0.015))
+    model.params["opacities"] = mx.full(model.params["opacities"].shape, 6.0)
+
+    from PIL import Image
+
+    os.makedirs(img_dir, exist_ok=True)
+    cams = {}
+    for k in range(views):
+        az = 45.0 + 90.0 * k / (views - 1)
+        elev = 15.0 + 8.0 * np.sin(3.0 * np.pi * k / views)
+        eye = (
+            3.2 * np.cos(np.radians(elev)) * np.cos(np.radians(az)),
+            -3.2 * np.sin(np.radians(elev)),
+            3.2 * np.cos(np.radians(elev)) * np.sin(np.radians(az)),
+        )
+        cam = Camera.look_at(eye=eye, at=(-0.2, 0.2, -0.2), fov=55.0, width=size, height=size)
+        name = f"v{k:03d}.png"
+        arr = (np.clip(np.array(model.render(cam)["image"]), 0, 1) * 255).astype(np.uint8)
+        Image.fromarray(arr).save(os.path.join(img_dir, name))
+        cams[name] = cam
+    return cams
+
+
+def _similarity_align(est: np.ndarray, gt: np.ndarray):
+    """Procrustes: returns (s, R, t) with gt ~ s * est @ R + t (row vectors)."""
+    mu_e, mu_g = est.mean(0), gt.mean(0)
+    E, G = est - mu_e, gt - mu_g
+    U, S, Vt = np.linalg.svd(E.T @ G)
+    D = np.diag([1.0, 1.0, np.sign(np.linalg.det(U @ Vt))])
+    R = U @ D @ Vt
+    s = (S * np.diag(D)).sum() / (E**2).sum()
+    return s, R, mu_g - s * mu_e @ R
+
+
+def test_builtin_sfm_recovers_synthetic_poses(tmp_path):
+    pytest.importorskip("cv2")
+    pytest.importorskip("scipy")
+    from mlx3d.capture import SfmConfig, list_images, run_sfm
+
+    img_dir = str(tmp_path / "input")
+    gt = _render_corner_scene(img_dir, views=12, size=320)
+    result = run_sfm(
+        list_images(img_dir), str(tmp_path), config=SfmConfig(seed=0), log=lambda *_: None
+    )
+    assert len(result.registered) >= 10  # nearly all views register
+    assert result.num_points > 200
+    assert result.mean_reproj_px < 2.0
+
+    ds = load_colmap(str(tmp_path), images_dir=img_dir, load_images=False)
+    est = np.stack([np.array(c.camera_center) for c in ds.cameras])
+    ref = np.stack([np.array(gt[n].camera_center) for n in ds.image_names])
+    s, R_align, t = _similarity_align(est, ref)
+    center_err = np.linalg.norm(s * est @ R_align + t - ref, axis=1)
+    assert center_err.mean() < 0.05 * 3.2  # < 5% of the camera-orbit radius
+
+    rot_errs = []
+    for cam, name in zip(ds.cameras, ds.image_names):
+        R_delta = np.array(gt[name].R) @ (np.array(cam.R) @ R_align).T
+        rot_errs.append(
+            np.degrees(np.arccos(np.clip((np.trace(R_delta) - 1) / 2, -1, 1)))
+        )
+    assert np.mean(rot_errs) < 3.0  # degrees
+
+    # Focal refinement pulls the 1.2*dim prior toward the true focal.
+    true_f = gt[ds.image_names[0]].fx
+    assert abs(ds.cameras[0].fx - true_f) / true_f < 0.05
