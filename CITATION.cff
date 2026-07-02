@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use MLX3D in your research, please cite it as below."
+title: "MLX3D: Differentiable 3D computer vision on Apple Silicon"
+type: software
+authors:
+  - family-names: "Razlighi"
+    given-names: "AmirHossein"
+    email: arazlighi@gmail.com
+repository-code: "https://github.com/amirhossein-razlighi/mlx3D"
+url: "https://amirhossein-razlighi.github.io/mlx3D/"
+license: MIT
+keywords:
+  - MLX
+  - Apple Silicon
+  - differentiable rendering
+  - gaussian splatting
+  - NeRF
+  - computer vision
