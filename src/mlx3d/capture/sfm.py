@@ -246,9 +246,7 @@ class _Reconstruction:
         return removed
 
 
-def _match_pair(desc1, desc2, ratio: float):
-    cv2 = _import_cv2()
-    matcher = cv2.BFMatcher(cv2.NORM_L2)
+def _match_pair(matcher, desc1, desc2, ratio: float):
     knn = matcher.knnMatch(desc1, desc2, k=2)
     good = [m for m, n in (p for p in knn if len(p) == 2) if m.distance < ratio * n.distance]
     return np.array([(m.queryIdx, m.trainIdx) for m in good], dtype=np.int64).reshape(-1, 2)
@@ -327,11 +325,12 @@ def run_sfm(
 
     # ---- pairwise matching + geometric verification
     pairs = _candidate_pairs(len(image_paths), cfg)
+    matcher = cv2.BFMatcher(cv2.NORM_L2)
     matches: dict[tuple[int, int], np.ndarray] = {}
     for i, j in pairs:
         if min(len(keypoints[i]), len(keypoints[j])) < cfg.min_pair_inliers:
             continue
-        m = _match_pair(descriptors[i], descriptors[j], cfg.match_ratio)
+        m = _match_pair(matcher, descriptors[i], descriptors[j], cfg.match_ratio)
         if len(m) < cfg.min_pair_inliers:
             continue
         p1, p2 = keypoints[i][m[:, 0]], keypoints[j][m[:, 1]]
@@ -552,12 +551,10 @@ def run_sfm(
 
     pids = [pid for pid in range(len(rec.points)) if len(rec.point_obs[pid]) >= 2]
     xyz = np.array([rec.points[p] for p in pids]).reshape(-1, 3)
-    col = np.array(
-        [
-            rec.kp_colors[min(rec.point_obs[p])][rec.point_obs[p][min(rec.point_obs[p])]]
-            for p in pids
-        ]
-    ).reshape(-1, 3)
+    col = np.empty((len(pids), 3))
+    for k, p in enumerate(pids):
+        img = min(rec.point_obs[p])  # color from the first observing image
+        col[k] = rec.kp_colors[img][rec.point_obs[p][img]]
     errors = np.array([rec.reproj_errors(p) for p in pids])
     sparse_dir = save_colmap(out_root, cams, names, xyz, col, point_errors=errors)
     mean_err = float(errors.mean()) if len(errors) else 0.0
