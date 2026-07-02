@@ -69,10 +69,12 @@ def render_mesh_soft(
     texture values. Topology and UV indices are treated as discrete.
 
     The rasterizer processes faces in batches of ``face_chunk_size`` to keep
-    memory use bounded: each chunk creates ``(chunk, H, W)`` intermediates so
-    even large meshes can be rendered on 8-16 GB machines.  Set
-    ``face_chunk_size=None`` to disable chunking (faster for small meshes that
-    fit comfortably in memory).
+    memory use bounded: each chunk creates ``(chunk, H, W)`` intermediates and
+    the per-chunk accumulators are evaluated before moving on, so peak memory
+    stays ~one chunk regardless of face count. Set ``face_chunk_size=None`` to
+    disable chunking (faster for small meshes that fit comfortably in memory).
+    This renderer is O(F*H*W); for visualizing dense meshes (e.g. marching-cubes
+    output) prefer the O(H*W) hard rasterizer :func:`rasterize_meshes`.
 
     Args:
         camera: Pinhole camera.
@@ -206,6 +208,15 @@ def render_mesh_soft(
         sum_w = sum_w + mx.sum(weights, axis=0)
         sum_wc = sum_wc + mx.sum(weights[..., None] * colors, axis=0)
         sum_wz = sum_wz + mx.sum(weights * z_face, axis=0)
+
+        # Materialize the accumulators now so this chunk's large (C, H, W)
+        # intermediates can be freed before the next iteration. Without this the
+        # whole loop is one lazy graph and every chunk stays resident until the
+        # final eval, so peak memory grows with the face count (defeating the
+        # point of chunking and OOM-ing large meshes). eval is gradient-safe:
+        # value_and_grad still recovers the correct grads through the chunks.
+        if face_chunk_size is not None:
+            mx.eval(sum_w, sum_wc, sum_wz)
 
     image = sum_wc / mx.maximum(sum_w[..., None], eps)
     alpha = 1.0 - mx.exp(-sum_w)

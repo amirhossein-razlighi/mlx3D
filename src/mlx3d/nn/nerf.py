@@ -83,7 +83,12 @@ class NeRF(nn.Module):
                 h = mx.concatenate([h, x], axis=-1)
             h = nn.relu(layer(h))
 
-        density = nn.relu(self.density_head(h)[..., 0])
+        # Softplus (not ReLU) for the density activation: ReLU's zero region
+        # has zero gradient, so with the usual Linear init the density head
+        # starts negative everywhere, outputs 0, and the network never receives
+        # a gradient (dead NeRF). Softplus is positive and differentiable
+        # everywhere, so training always has signal.
+        density = nn.softplus(self.density_head(h)[..., 0])
         feat = self.feature(h)
         d = self.dir_enc(directions)
         ch = nn.relu(self.color_hidden(mx.concatenate([feat, d], axis=-1)))
