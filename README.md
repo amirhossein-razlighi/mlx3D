@@ -18,6 +18,7 @@ MLX3D brings the PyTorch3D workflow to Macs: batched 3D data structures, cameras
 - **NeRF** — positional encoding, the NeRF MLP, stratified + hierarchical sampling, volume rendering, Blender-synthetic dataset loader.
 - **Mesh rendering** — differentiable soft triangle rasterization, UV texture sampling for OBJ/MTL assets, and scalar-field mesh extraction.
 - **Gaussian Splatting** — a Metal translation of the reference CUDA rasterizer (tile-based forward & backward kernels wrapped in `mx.custom_function`), EWA projection, spherical harmonics, anti-aliased and arbitrary feature rendering, adaptive density control, COLMAP loading, and standard 3DGS `.ply` checkpoints. ~30 FPS forward at 720p with 100k Gaussians on an M-series GPU.
+- **Capture pipeline** — `mlx3d-capture photos_or_video` goes from raw photos or a phone video to a trained splat in one resumable command: sharp-frame selection, COLMAP or built-in COLMAP-free SfM (with joint pose refinement during training), live training preview, and a compacted `.ply` export.
 - **Interactive viewer** — `mlx3d-view point_cloud.ply` opens a browser viewer with orbit/pan/zoom; frames are rendered on the Apple GPU by the Metal rasterizer and streamed live. Works for NeRFs too.
 - **IO** — OBJ and PLY (ascii + binary, including Gaussian Splatting checkpoint layouts), plus one-line image `save_image` / `load_image` for any renderer output.
 - **Composable & extensible** — every image renderer is a plain callable `(camera, scene) -> {"image", "alpha", "depth"}` (the [`Renderer`](src/mlx3d/renderer/protocols.py) protocol), so you can drop in your own rasterizer, shader, or ray tracer and reuse the rest of the pipeline — no base classes to subclass.
@@ -29,6 +30,31 @@ pip install mlx3d
 ```
 
 Requires an Apple Silicon Mac and Python ≥ 3.10.
+
+## Photos → splat in minutes
+
+Turn a folder of photos — or a phone video — into a trained 3D Gaussian Splat
+with one command, entirely on your Mac:
+
+```bash
+mlx3d-capture ./my_photos/          # or: mlx3d-capture walkaround.mp4
+```
+
+This runs the whole pipeline: frame extraction (with automatic motion-blur
+filtering for video) → camera poses → 3DGS training with a **live browser
+viewer** → a compacted `splat.ply` you can open in any splat viewer. Poses
+come from COLMAP when it's installed (`brew install colmap`); otherwise
+mlx3d's **built-in COLMAP-free SfM** (`pip install "mlx3d[capture]"`) handles
+them and the trainer refines poses jointly with the splats. Stages are cached,
+so re-runs resume where they left off.
+
+```bash
+mlx3d-capture clip.mp4 --quality fast     # quick preview
+mlx3d-capture ./my_photos/ --quality best # 30k iterations, full resolution
+```
+
+See the [capture tutorial](https://amirhossein-razlighi.github.io/mlx3D/tutorials/capture/)
+for capture tips and every option.
 
 ## Quick example
 
