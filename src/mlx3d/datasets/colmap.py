@@ -1,7 +1,7 @@
-"""Loader for COLMAP sparse reconstructions (the standard input for 3DGS).
+"""Loader/writer for COLMAP sparse reconstructions (the standard input for 3DGS).
 
-Reads ``cameras.bin`` / ``images.bin`` / ``points3D.bin`` (binary format) and
-the corresponding images directory.
+Reads and writes ``cameras.bin`` / ``images.bin`` / ``points3D.bin`` (binary
+format) alongside the corresponding images directory.
 """
 
 import os
@@ -14,7 +14,7 @@ import numpy as np
 from ..cameras import Camera
 from .images import ImageCollection
 
-__all__ = ["ColmapDataset", "load_colmap"]
+__all__ = ["ColmapDataset", "load_colmap", "save_colmap"]
 
 
 @dataclass
@@ -102,6 +102,109 @@ def _read_points3d_bin(path: str) -> tuple[np.ndarray, np.ndarray]:
             track_len = struct.unpack("<Q", f.read(8))[0]
             f.read(8 * track_len)
     return xyz, rgb
+
+
+def _rotmat_to_qvec(R: np.ndarray) -> np.ndarray:
+    """Rotation matrix to COLMAP quaternion (w, x, y, z)."""
+    trace = np.trace(R)
+    if trace > 0:
+        s = 0.5 / np.sqrt(trace + 1.0)
+        q = np.array(
+            [0.25 / s, (R[2, 1] - R[1, 2]) * s, (R[0, 2] - R[2, 0]) * s, (R[1, 0] - R[0, 1]) * s]
+        )
+    else:
+        i = int(np.argmax(np.diag(R)))
+        j, k = (i + 1) % 3, (i + 2) % 3
+        s = 2.0 * np.sqrt(max(1.0 + R[i, i] - R[j, j] - R[k, k], 1e-12))
+        q = np.empty(4)
+        q[0] = (R[k, j] - R[j, k]) / s
+        q[1 + i] = 0.25 * s
+        q[1 + j] = (R[j, i] + R[i, j]) / s
+        q[1 + k] = (R[k, i] + R[i, k]) / s
+    if q[0] < 0:
+        q = -q
+    return q / np.linalg.norm(q)
+
+
+def _camera_bin_entry(cam: Camera) -> tuple[int, int, int, tuple[float, ...]]:
+    """Map a :class:`Camera` to a COLMAP (model_id, width, height, params) tuple."""
+    fx, fy, cx, cy = float(cam.fx), float(cam.fy), float(cam.cx), float(cam.cy)
+    if cam.distortion is None:
+        return 1, cam.width, cam.height, (fx, fy, cx, cy)  # PINHOLE
+    d = tuple(float(v) for v in cam.distortion) + (0.0,) * 4
+    if cam.fisheye:
+        return 5, cam.width, cam.height, (fx, fy, cx, cy, *d[:4])  # OPENCV_FISHEYE
+    return 4, cam.width, cam.height, (fx, fy, cx, cy, *d[:4])  # OPENCV
+
+
+def save_colmap(
+    root: str,
+    cameras: list[Camera],
+    image_names: list[str],
+    points,
+    point_colors,
+    point_errors=None,
+) -> str:
+    """Write a COLMAP binary sparse model to ``root/sparse/0``.
+
+    The inverse of :func:`load_colmap` (2D observations/tracks are not stored).
+    Identical intrinsics are deduplicated into a shared COLMAP camera. Colors
+    are float in [0, 1]; points/colors accept MLX or NumPy arrays.
+
+    Returns the sparse model directory.
+    """
+    if len(cameras) != len(image_names):
+        raise ValueError("save_colmap needs one image name per camera.")
+    sparse = os.path.join(root, "sparse", "0")
+    os.makedirs(sparse, exist_ok=True)
+
+    # cameras.bin (deduplicate identical intrinsics)
+    entries: list[tuple] = []
+    cam_ids: list[int] = []
+    for cam in cameras:
+        entry = _camera_bin_entry(cam)
+        if entry not in entries:
+            entries.append(entry)
+        cam_ids.append(entries.index(entry) + 1)
+    with open(os.path.join(sparse, "cameras.bin"), "wb") as f:
+        f.write(struct.pack("<Q", len(entries)))
+        for cam_id, (model_id, w, h, params) in enumerate(entries, start=1):
+            f.write(struct.pack("<iiQQ", cam_id, model_id, w, h))
+            f.write(struct.pack(f"<{len(params)}d", *params))
+
+    # images.bin
+    with open(os.path.join(sparse, "images.bin"), "wb") as f:
+        f.write(struct.pack("<Q", len(cameras)))
+        for i, (cam, name) in enumerate(zip(cameras, image_names)):
+            q = _rotmat_to_qvec(np.array(cam.R, dtype=np.float64))
+            t = np.array(cam.t, dtype=np.float64)
+            f.write(struct.pack("<i", i + 1))
+            f.write(struct.pack("<4d", *q))
+            f.write(struct.pack("<3d", *t))
+            f.write(struct.pack("<i", cam_ids[i]))
+            f.write(name.encode("utf-8") + b"\x00")
+            f.write(struct.pack("<Q", 0))  # no 2D observations
+
+    # points3D.bin
+    xyz = np.asarray(points, dtype=np.float64).reshape(-1, 3)
+    rgb = np.asarray(point_colors, dtype=np.float64).reshape(-1, 3)
+    if rgb.shape[0] != xyz.shape[0]:
+        raise ValueError("points and point_colors must have the same length.")
+    rgb8 = np.clip(rgb * 255.0 + 0.5, 0, 255).astype(np.uint8)
+    err = (
+        np.full((xyz.shape[0],), -1.0)
+        if point_errors is None
+        else np.asarray(point_errors, dtype=np.float64).reshape(-1)
+    )
+    with open(os.path.join(sparse, "points3D.bin"), "wb") as f:
+        f.write(struct.pack("<Q", xyz.shape[0]))
+        for i in range(xyz.shape[0]):
+            f.write(struct.pack("<Q", i + 1))
+            f.write(struct.pack("<3d", *xyz[i]))
+            f.write(struct.pack("<3B", *rgb8[i]))
+            f.write(struct.pack("<d", float(err[i])))
+            f.write(struct.pack("<Q", 0))  # empty track
+    return sparse
 
 
 def _qvec_to_rotmat(q: np.ndarray) -> np.ndarray:

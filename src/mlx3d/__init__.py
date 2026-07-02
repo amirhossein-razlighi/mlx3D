@@ -4,6 +4,7 @@ __version__ = "0.2.1"
 
 from . import (
     cameras,
+    capture,
     datasets,
     io,
     losses,
@@ -20,6 +21,7 @@ from . import (
 __all__ = [
     "__version__",
     "cameras",
+    "capture",
     "datasets",
     "io",
     "losses",
