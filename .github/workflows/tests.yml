@@ -36,7 +36,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
       - name: Install
-        run: uv sync
+        # --extra capture pulls OpenCV + SciPy so the built-in SfM tests run.
+        run: uv sync --extra capture
       - name: Smoke tests
         run: uv run pytest tests/ -m smoke -v
       - name: Unit + data tests
