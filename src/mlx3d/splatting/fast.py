@@ -24,8 +24,8 @@ the same ideas end to end:
   sentinel tile, so the whole frame is submitted as one lazy graph. The
   training path must sync mid-frame to size its buffers.
 - **Forward-only compositing kernel**: no backward bookkeeping
-  (``n_contrib``), a half-precision splat payload (conic / opacity / color
-  quantization error < 0.1%), and an adjustable early-termination
+  (``n_contrib``), half-precision splat colors (quantization error < 0.1%;
+  conics stay fp32 to survive near-camera footprints), and an adjustable early-termination
   transmittance for extra speed.
 
 No backward pass — use :func:`~mlx3d.splatting.render_gaussians` for
@@ -149,14 +149,17 @@ _GEOMETRY_SRC = """
     xy[2 * g + 0] = u;
     xy[2 * g + 1] = v;
     depths[g] = z;
-    payload[8 * g + 0] = (half)(c / det_safe);
-    payload[8 * g + 1] = (half)(-b / det_safe);
-    payload[8 * g + 2] = (half)(a / det_safe);
-    payload[8 * g + 3] = (half)(opacities[g] * comp);
-    payload[8 * g + 4] = (half)colors[3 * g + 0];
-    payload[8 * g + 5] = (half)colors[3 * g + 1];
-    payload[8 * g + 6] = (half)colors[3 * g + 2];
-    payload[8 * g + 7] = (half)0.0f;
+    // Conic + opacity stay fp32: near-camera splats have huge footprints and
+    // tiny conic coefficients that underflow half precision. Colors are in
+    // [0, ~few] where half error is < 0.1%.
+    conic_opac[4 * g + 0] = c / det_safe;
+    conic_opac[4 * g + 1] = -b / det_safe;
+    conic_opac[4 * g + 2] = a / det_safe;
+    conic_opac[4 * g + 3] = opacities[g] * comp;
+    rgbh[4 * g + 0] = (half)colors[3 * g + 0];
+    rgbh[4 * g + 1] = (half)colors[3 * g + 1];
+    rgbh[4 * g + 2] = (half)colors[3 * g + 2];
+    rgbh[4 * g + 3] = (half)0.0f;
     bbox[4 * g + 0] = xmin;
     bbox[4 * g + 1] = xmax;
     bbox[4 * g + 2] = ymin;
@@ -215,7 +218,7 @@ _RANGES_SRC = """
 """
 
 # --------------------------------------------------------------------------
-# Kernel 4 — forward-only tile compositing with a packed half payload.
+# Kernel 4 — forward-only tile compositing (fp32 conics, fp16 colors).
 # --------------------------------------------------------------------------
 _RASTER_FAST_SRC = """
     constexpr int TILE = 16;
@@ -254,12 +257,10 @@ _RASTER_FAST_SRC = """
         const int load = range_start + b * BLOCK + tidx;
         if (load < range_end) {
             const int g = dup_ids[sort_idx[load]];
-            // Vectorized loads: one float2 + two half4 per splat.
+            // Vectorized loads: float2 + float4 + half4 per splat.
             sm_xy[tidx] = ((device const float2*)xy)[g];
-            const float4 co = float4(((device const half4*)payload)[2 * g]);
-            const float4 rgba = float4(((device const half4*)payload)[2 * g + 1]);
-            sm_co[tidx] = co;
-            sm_rgb[tidx] = rgba.xyz;
+            sm_co[tidx] = ((device const float4*)conic_opac)[g];
+            sm_rgb[tidx] = float4(((device const half4*)rgbh)[g]).xyz;
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
         if (done) continue;
@@ -292,7 +293,7 @@ _RASTER_FAST_SRC = """
 _geometry_kernel = mx.fast.metal_kernel(
     name="gs_fast_geometry",
     input_names=["means", "cov3d", "opacities", "colors", "fparams", "iparams"],
-    output_names=["xy", "depths", "payload", "bbox", "counts"],
+    output_names=["xy", "depths", "conic_opac", "rgbh", "bbox", "counts"],
     source=_GEOMETRY_SRC,
 )
 
@@ -313,7 +314,15 @@ _ranges_kernel = mx.fast.metal_kernel(
 _raster_fast_kernel = mx.fast.metal_kernel(
     name="gs_fast_raster",
     input_names=[
-        "xy", "payload", "dup_ids", "sort_idx", "tile_ranges", "background", "fparams", "iparams"
+        "xy",
+        "conic_opac",
+        "rgbh",
+        "dup_ids",
+        "sort_idx",
+        "tile_ranges",
+        "background",
+        "fparams",
+        "iparams",
     ],
     output_names=["image", "final_T"],
     source=_RASTER_FAST_SRC,
@@ -352,7 +361,7 @@ class FastGaussianRenderer:
     Precomputes activations, 3D covariances, and SH colors once; per frame it
     runs three fused Metal kernels with no mid-frame CPU synchronization.
     Roughly matching the reference renderer at the pixel level (identical
-    compositing math; the splat payload is quantized to fp16 and early
+    compositing math; splat colors are quantized to fp16 and early
     termination is slightly more aggressive).
 
     Args:
@@ -539,10 +548,17 @@ class FastGaussianRenderer:
             [self.n, w, h, tiles_x, tiles_y, int(self.antialias)], dtype=mx.int32
         )
 
-        xy, depths, payload, bbox, counts = _geometry_kernel(
+        xy, depths, conic_opac, rgbh, bbox, counts = _geometry_kernel(
             inputs=[self.means, self.cov3d, self.opacities, colors, fparams, iparams_geo],
-            output_shapes=[(self.n, 2), (self.n,), (self.n, 8), (self.n, 4), (self.n,)],
-            output_dtypes=[mx.float32, mx.float32, mx.float16, mx.int32, mx.int32],
+            output_shapes=[
+                (self.n, 2),
+                (self.n,),
+                (self.n, 4),
+                (self.n, 4),
+                (self.n, 4),
+                (self.n,),
+            ],
+            output_dtypes=[mx.float32, mx.float32, mx.float32, mx.float16, mx.int32, mx.int32],
             grid=(self.n, 1, 1),
             threadgroup=(min(256, self.n), 1, 1),
         )
@@ -560,7 +576,7 @@ class FastGaussianRenderer:
 
         for _attempt in range(2):
             image, final_T = self._composite(
-                xy, payload, order, offsets, counts, bbox, background, total,
+                xy, conic_opac, rgbh, order, offsets, counts, bbox, background, total,
                 w, h, tiles_x, tiles_y, num_tiles,
             )
             # The capacity check rides on the frame's own eval: no extra sync.
@@ -573,7 +589,7 @@ class FastGaussianRenderer:
         return {"image": image, "alpha": 1.0 - final_T}
 
     def _composite(
-        self, xy, payload, order, offsets, counts, bbox, background, total,
+        self, xy, conic_opac, rgbh, order, offsets, counts, bbox, background, total,
         w, h, tiles_x, tiles_y, num_tiles,
     ):
         capacity = self._capacity
@@ -610,7 +626,10 @@ class FastGaussianRenderer:
         iparams_r = mx.array([w, h, tiles_x], dtype=mx.int32)
         fparams_r = mx.array([self.t_min], dtype=mx.float32)
         image, final_T = _raster_fast_kernel(
-            inputs=[xy, payload, dup_ids, sort_idx, tile_ranges, background, fparams_r, iparams_r],
+            inputs=[
+                xy, conic_opac, rgbh, dup_ids, sort_idx, tile_ranges,
+                background, fparams_r, iparams_r,
+            ],
             output_shapes=[(h, w, 3), (h, w)],
             output_dtypes=[mx.float32, mx.float32],
             grid=(tiles_x * TILE_SIZE, tiles_y * TILE_SIZE, 1),
