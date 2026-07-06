@@ -481,9 +481,13 @@ class FastGaussianRenderer:
     def _view_colors(self, camera: Camera) -> mx.array:
         if self._colors_static is not None:
             return self._colors_static
+        # The cache key lives in plain Python floats: viewers render on HTTP
+        # handler threads, and MLX cannot evaluate lazy arrays created on a
+        # different thread, so no cross-frame MLX graph may survive here.
         center = camera.camera_center
+        center_f = tuple(float(c) for c in center)
         if self._cached_colors is not None and self.color_refresh > 0:
-            moved = float(mx.linalg.norm(center - self._cached_color_center).item())
+            moved = sum((a - b) ** 2 for a, b in zip(center_f, self._cached_color_center)) ** 0.5
             if moved < self.color_refresh * self._scene_radius:
                 return self._cached_colors
         deg = self.sh_degree if self._sh_degree_cap is None else self._sh_degree_cap
@@ -493,7 +497,7 @@ class FastGaussianRenderer:
         colors = mx.maximum(eval_sh(deg, self._sh, dirs), 0.0)
         mx.eval(colors)
         self._cached_colors = colors
-        self._cached_color_center = center
+        self._cached_color_center = center_f
         return colors
 
     # ----------------------------------------------------------------- render
