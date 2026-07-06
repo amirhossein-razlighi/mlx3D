@@ -49,7 +49,10 @@ def scene_orbit(model: GaussianModel, width: int, height: int):
         th = 0.12 * i
         eye = center + radius * np.array([math.sin(th), 0.25, -math.cos(th)])
         return Camera.look_at(
-            eye=tuple(eye), at=tuple(center), width=width, height=height
+            eye=tuple(float(c) for c in eye),
+            at=tuple(float(c) for c in center),
+            width=width,
+            height=height,
         )
 
     return cam
