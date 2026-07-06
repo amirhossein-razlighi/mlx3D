@@ -365,9 +365,8 @@ class FastGaussianRenderer:
     termination is slightly more aggressive).
 
     Args:
-        model: a :class:`~mlx3d.splatting.GaussianModel` (or anything exposing
-            ``params``, ``scales_act``, ``opacities_act``, ``sh``,
-            ``active_sh_degree``).
+        model (GaussianModel): the scene (or anything exposing ``params``,
+            ``scales_act``, ``opacities_act``, ``sh``, ``active_sh_degree``).
         sh_degree: cap the evaluated SH degree (``None`` = the model's active
             degree; ``0`` renders view-independent color, fastest).
         t_min: transmittance early-termination threshold. The training kernel
