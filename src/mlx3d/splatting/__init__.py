@@ -1,3 +1,4 @@
+from .fast import FastGaussianRenderer, render_gaussians_fast
 from .model import GaussianModel
 from .projection import project_gaussians, project_gaussians_ut, quat_scale_to_cov3d
 from .rasterize import rasterize, rasterize_depth, rasterize_features
@@ -8,6 +9,7 @@ from .tiles import TILE_SIZE, bin_gaussians
 from .trainer import GaussianTrainer, TrainerConfig
 
 __all__ = [
+    "FastGaussianRenderer",
     "GaussianModel",
     "GaussianTrainer",
     "TILE_SIZE",
@@ -24,6 +26,7 @@ __all__ = [
     "render_gaussian_depth",
     "render_gaussian_features",
     "render_gaussians",
+    "render_gaussians_fast",
     "render_gaussians_reference",
     "rgb_to_sh",
     "sh_to_rgb",
