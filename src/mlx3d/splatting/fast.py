@@ -456,9 +456,7 @@ class FastGaussianRenderer:
         else:
             if quats is None or scales is None:
                 raise ValueError("Provide quats+scales or cov3d.")
-            self.cov3d = _cov3d_upper(
-                quats.astype(mx.float32), scales.astype(mx.float32)
-            )
+            self.cov3d = _cov3d_upper(quats.astype(mx.float32), scales.astype(mx.float32))
         if opacities is not None:
             self.opacities = opacities.astype(mx.float32)
         if (colors is None) == (sh is None) and colors is not None:
@@ -575,8 +573,20 @@ class FastGaussianRenderer:
 
         for _attempt in range(2):
             image, final_T = self._composite(
-                xy, conic_opac, rgbh, order, offsets, counts, bbox, background, total,
-                w, h, tiles_x, tiles_y, num_tiles,
+                xy,
+                conic_opac,
+                rgbh,
+                order,
+                offsets,
+                counts,
+                bbox,
+                background,
+                total,
+                w,
+                h,
+                tiles_x,
+                tiles_y,
+                num_tiles,
             )
             # The capacity check rides on the frame's own eval: no extra sync.
             mx.eval(image, final_T, total)
@@ -588,8 +598,21 @@ class FastGaussianRenderer:
         return {"image": image, "alpha": 1.0 - final_T}
 
     def _composite(
-        self, xy, conic_opac, rgbh, order, offsets, counts, bbox, background, total,
-        w, h, tiles_x, tiles_y, num_tiles,
+        self,
+        xy,
+        conic_opac,
+        rgbh,
+        order,
+        offsets,
+        counts,
+        bbox,
+        background,
+        total,
+        w,
+        h,
+        tiles_x,
+        tiles_y,
+        num_tiles,
     ):
         capacity = self._capacity
         iparams_exp = mx.array([self.n, tiles_x, capacity], dtype=mx.int32)
@@ -626,8 +649,15 @@ class FastGaussianRenderer:
         fparams_r = mx.array([self.t_min], dtype=mx.float32)
         image, final_T = _raster_fast_kernel(
             inputs=[
-                xy, conic_opac, rgbh, dup_ids, sort_idx, tile_ranges,
-                background, fparams_r, iparams_r,
+                xy,
+                conic_opac,
+                rgbh,
+                dup_ids,
+                sort_idx,
+                tile_ranges,
+                background,
+                fparams_r,
+                iparams_r,
             ],
             output_shapes=[(h, w, 3), (h, w)],
             output_dtypes=[mx.float32, mx.float32],
