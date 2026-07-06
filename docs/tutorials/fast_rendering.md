@@ -134,10 +134,12 @@ for t in range(sequence.num_timesteps):
 | **fast** (update + render) | **14.9** | **67.3** |
 
 <p align="center">
-  <img src="../../assets/fast_4dgs_juggle.gif" width="60%" />
+  <video src="../../assets/fast_4dgs_juggle.mp4" width="70%" autoplay loop muted playsinline controls></video>
   <br/>
-  <em>Real-time 4D playback rendered entirely by the fast path
-  (67 fps at this resolution on an M1 Pro).</em>
+  <em>The full juggle sequence — every timestep's positions, rotations, and
+  colors streamed through <code>update()</code> and rendered entirely by the
+  fast path (67 fps at 640×360, ~14 fps at the 960×540 shown here, on an
+  M1 Pro).</em>
 </p>
 
 <p align="center">
