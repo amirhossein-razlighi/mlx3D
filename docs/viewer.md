@@ -18,7 +18,10 @@ mlx3d-view point_cloud.ply
 # or: python -m mlx3d.viewer point_cloud.ply --background 1 1 1 --port 8090
 ```
 
-This opens `http://127.0.0.1:8090` in your browser.
+This opens `http://127.0.0.1:8090` in your browser. Add `--fast` to render
+RGB frames with the forward-only
+[fast rasterizer](tutorials/fast_rendering.md) — 1.5–2× higher frame rates
+while orbiting, at 45+ dB parity with the training renderer.
 
 From Python:
 

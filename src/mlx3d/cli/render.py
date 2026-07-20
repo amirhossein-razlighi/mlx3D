@@ -143,6 +143,11 @@ def _render_gaussian(args: argparse.Namespace) -> mx.array:
     if args.mode == "depth":
         out = model.render_depth(cam, antialias=args.antialias, projection=args.projection)
         return _depth_to_rgb(out["depth"], out["alpha"])
+    if args.fast and args.mode == "rgb":
+        from ..splatting import FastGaussianRenderer
+
+        renderer = FastGaussianRenderer(model, antialias=args.antialias)
+        return renderer.render(cam, background=bg)["image"]
     out = model.render(cam, background=bg, antialias=args.antialias, projection=args.projection)
     if args.mode == "normal":
         normals = quaternion_to_matrix(model.params["quats"])[:, :, 2]
@@ -200,6 +205,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--background", type=float, nargs=3, default=(0.0, 0.0, 0.0))
     parser.add_argument("--antialias", action="store_true", help="Gaussian opacity compensation")
     parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="forward-only fast Gaussian rasterization (rgb mode, EWA projection)",
+    )
+    parser.add_argument(
         "--projection",
         choices=["ewa", "ut"],
         default="ewa",
@@ -220,6 +230,10 @@ def main(argv: list[str] | None = None) -> None:
         parser.error("--ssaa must be positive.")
     if args.unlit and args.shading is not None:
         parser.error("--unlit cannot be combined with --shading.")
+    if args.fast and args.projection != "ewa":
+        parser.error("--fast supports only the EWA projection.")
+    if args.fast and args.mode != "rgb":
+        parser.error("--fast supports only --mode rgb.")
 
     kind = args.type
     if kind == "auto":

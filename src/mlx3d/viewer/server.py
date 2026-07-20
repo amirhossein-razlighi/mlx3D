@@ -322,6 +322,7 @@ def view_gaussians(
     port: int = 8090,
     open_browser: bool = True,
     serve: bool = True,
+    fast: bool = False,
 ) -> Viewer:
     """Open an interactive viewer for a :class:`~mlx3d.splatting.GaussianModel`.
 
@@ -334,6 +335,9 @@ def view_gaussians(
         background: RGB background color.
         serve: start the (blocking) server; pass ``False`` to get the
             configured :class:`Viewer` back instead (used in tests).
+        fast: use the forward-only
+            :class:`~mlx3d.splatting.FastGaussianRenderer` for the RGB mode
+            (1.5-4x faster orbiting; depth/mesh modes keep the standard path).
     """
     bg = mx.array(background)
     # Handler threads cannot evaluate lazy arrays created here on the main
@@ -344,8 +348,27 @@ def view_gaussians(
     center = means.mean(axis=0)
     radius = float(np.percentile(np.linalg.norm(means - center, axis=1), 90)) * 2.5 + 1e-3
 
-    def render(camera: Camera) -> mx.array:
-        return model.render(camera, background=bg)["image"]
+    if fast:
+        from ..splatting import FastGaussianRenderer
+
+        fast_renderer = FastGaussianRenderer(model)
+        # Warm up on this thread: compiles the kernels, sizes the duplicate
+        # buffers, and fills the color cache before HTTP threads render.
+        warm_cam = Camera.look_at(
+            eye=tuple(float(c) for c in center + np.array([0.0, 0.0, -radius])),
+            at=tuple(float(c) for c in center),
+            width=64,
+            height=64,
+        )
+        mx.eval(fast_renderer.render(warm_cam, background=bg)["image"])
+
+        def render(camera: Camera) -> mx.array:
+            return fast_renderer.render(camera, background=bg)["image"]
+
+    else:
+
+        def render(camera: Camera) -> mx.array:
+            return model.render(camera, background=bg)["image"]
 
     def render_depth(camera: Camera) -> mx.array:
         depth_out = model.render_depth(camera)
@@ -357,7 +380,10 @@ def view_gaussians(
 
     viewer = Viewer(
         render,
-        info={"mode": "gaussian splatting", "gaussians": model.num_gaussians},
+        info={
+            "mode": "gaussian splatting (fast)" if fast else "gaussian splatting",
+            "gaussians": model.num_gaussians,
+        },
         render_modes={"depth": render_depth, "mesh": render_mesh},
         initial_radius=radius,
         initial_target=tuple(float(c) for c in center),

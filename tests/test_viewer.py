@@ -159,3 +159,17 @@ def test_live_http_info_updates():
     assert info["revision"] > info0["revision"]
     assert info["step"] == 11
     assert info["loss"] == 0.25
+
+
+def test_view_gaussians_fast_http():
+    model = GaussianModel.from_points(mx.random.normal((50, 3)) * 0.3, sh_degree=0)
+    viewer = view_gaussians(model, serve=False, fast=True)
+    base = _serve_in_background(viewer)
+
+    info = json.loads(urllib.request.urlopen(base + "/info", timeout=5).read())
+    assert info["mode"] == "gaussian splatting (fast)"
+
+    frame = urllib.request.urlopen(
+        base + "/render?theta=0.4&phi=0.2&radius=3&w=64&h=48", timeout=10
+    ).read()
+    assert frame[:2] == b"\xff\xd8"

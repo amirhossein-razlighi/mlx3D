@@ -26,6 +26,11 @@ def main() -> None:
     parser.add_argument(
         "--no-browser", action="store_true", help="don't open the browser automatically"
     )
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="use the forward-only fast rasterizer for RGB frames (1.5-4x faster orbiting)",
+    )
     args = parser.parse_args()
 
     from ..splatting import GaussianModel
@@ -40,6 +45,7 @@ def main() -> None:
         host=args.host,
         port=args.port,
         open_browser=not args.no_browser,
+        fast=args.fast,
     )
 
 

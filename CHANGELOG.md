@@ -4,6 +4,22 @@
 
 ### Added
 
+- Fast forward-only Gaussian rasterization (`FastGaussianRenderer`,
+  `render_gaussians_fast`), adapting the geometry-shader-style pipeline of
+  dendenxu/fast-gaussian-rasterization to Metal compute: a fused per-Gaussian
+  geometry kernel, duplicates emitted in globally depth-sorted order (stable
+  32-bit tile sort), boundary-detection tile ranges, fp16 splat colors, and
+  zero mid-frame CPU/GPU synchronization via persistent grow-on-demand
+  buffers. 1.5–2× faster than the training rasterizer on real scenes (up to
+  3.7× at high pixel-to-point ratios) at 45+ dB PSNR parity; not
+  differentiable (training keeps `render_gaussians`). Exposed as
+  `mlx3d-view --fast` and `mlx3d-render --fast`.
+- Dynamic (4D) Gaussian sequence playback: `FastGaussianRenderer.update()`
+  swaps per-timestep arrays cheaply;
+  `examples/play_dynamic_gaussians.py` streams a Dynamic 3D Gaussians
+  `params.npz` at 67 fps (vs 40 fps on the training path) with GIF/frame
+  export. New `examples/benchmark_fast_rasterization.py` reports
+  latency/FPS/PSNR on synthetic scenes or any 3DGS `.ply`.
 - `mlx3d-capture`: a one-command capture pipeline (photos directory or video
   file → camera poses → 3D Gaussian Splatting with a live browser viewer → a
   compacted `splat.ply`). Stages are cached and resumable; `--quality
