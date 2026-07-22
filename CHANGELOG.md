@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Changed
+
+- Faster Gaussian tile binning (`bin_gaussians`), on the critical path of every
+  render and training step. The default path now fuses expansion and
+  range-finding into two Metal kernels — tile duplicates are emitted in depth
+  order so only a stable 32-bit tile-key sort is needed, and per-tile ranges are
+  recovered by boundary detection instead of a scatter-min/max pass — replacing
+  the int64 composite-key argsort. Bit-identical output; ~2.5× faster binning
+  and ~26% faster forward rendering on a 500k-Gaussian scene at 1080p (so
+  viewers, evaluation, capture previews, and every training forward speed up).
+
 ### Added
 
 - Type support: mlx3d now ships a `py.typed` marker, so downstream projects
