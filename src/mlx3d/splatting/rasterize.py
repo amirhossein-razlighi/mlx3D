@@ -13,6 +13,13 @@ the tile-batched style of gsplat:
 
 The pair is wrapped in :func:`mx.custom_function`, so MLX autodiff chains
 the kernel gradients into the (pure-MLX) projection math upstream.
+
+Note: a SIMD-group-reduced backward (sum each Gaussian's per-pixel gradients
+with ``simd_sum`` and do one atomic per 32-lane group instead of up to 256)
+was tried and is ~3% *slower* on Apple GPUs — the backward is bound by the
+per-pixel recompute and the sequential transmittance walk, not by atomic
+contention, so the reduction only adds overhead. Left as one atomic per
+contributing (pixel, Gaussian) pair.
 """
 
 from __future__ import annotations
