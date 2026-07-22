@@ -15,6 +15,14 @@
 
 ### Added
 
+- Type support: mlx3d now ships a `py.typed` marker, so downstream projects
+  get its inline type hints under mypy / pyright.
+- Finite-difference gradient check for the Metal Gaussian rasterizer's
+  hand-written backward pass (`examples/validate_gaussian_gradients.py` plus a
+  `unit` test). Confirms the analytic gradients match numerical derivatives
+  (geometry to ~1e-2, appearance to ~1e-3), a runnable correctness artifact on
+  Apple Silicon.
+
 - Fast forward-only Gaussian rasterization (`FastGaussianRenderer`,
   `render_gaussians_fast`), adapting the geometry-shader-style pipeline of
   dendenxu/fast-gaussian-rasterization to Metal compute: a fused per-Gaussian
