@@ -170,3 +170,6 @@ outputs/
 
 # Local planning notes
 TODO.md
+
+# hatch-vcs generated version file
+src/mlx3d/_version.py
