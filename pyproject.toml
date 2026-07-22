@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "mlx3d"
-version = "0.2.1"
+dynamic = ["version"]
 description = "Differentiable 3D computer vision on Apple Silicon, built on MLX"
 authors = [{ name = "AmirHossein Razlighi", email = "arazlighi@gmail.com" }]
 license = { text = "MIT" }
@@ -71,6 +71,16 @@ mlx3d-render = "mlx3d.cli.render:main"
 Homepage = "https://github.com/amirhossein-razlighi/mlx3D"
 Documentation = "https://amirhossein-razlighi.github.io/mlx3D/"
 Repository = "https://github.com/amirhossein-razlighi/mlx3D"
+
+# Version is derived from the latest git tag (e.g. v0.3.0 -> 0.3.0) by
+# hatch-vcs. Never hand-edit a version anywhere: tag the release and push.
+[tool.hatch.version]
+source = "vcs"
+
+# Freeze the resolved version into the sdist so a wheel built from it (no .git)
+# still gets the right number.
+[tool.hatch.build.hooks.vcs]
+version-file = "src/mlx3d/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mlx3d"]
