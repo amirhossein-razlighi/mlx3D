@@ -66,6 +66,7 @@ nav:
   - Tutorials:
       - "Photos → Splat in Minutes": tutorials/capture.md
       - "Photos → Depth & Cameras": tutorials/feedforward_geometry.md
+      - Training on Real Captures: tutorials/real_captures.md
       - Mesh Optimization: tutorials/mesh_optimization.md
       - Mesh Rendering and Extraction: tutorials/mesh_rendering.md
       - Mesh Lighting and Shading: tutorials/mesh_lighting.md
