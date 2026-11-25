@@ -24,7 +24,7 @@ jobs:
   test:
     needs: lint
     # macos-14+ runners are Apple Silicon, required for MLX (Metal GPU).
-    runs-on: macos-14
+    runs-on: macos-15
     strategy:
       fail-fast: false
       matrix:
