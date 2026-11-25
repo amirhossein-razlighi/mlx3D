@@ -85,6 +85,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--low-mem", action="store_true", help="low-memory mode for 8-16 GB machines"
     )
+    masks = parser.add_argument_group("foreground masks")
+    source = masks.add_mutually_exclusive_group()
+    source.add_argument(
+        "--masks", default=None, help="foreground masks directory (<image name>.png, white = keep)"
+    )
+    source.add_argument(
+        "--masks-from-alpha", action="store_true", help="use the input images' alpha as masks"
+    )
+    masks.add_argument(
+        "--alpha-mode",
+        choices=["masked", "transparent"],
+        default="masked",
+        help="masked: ignore the background; transparent: train a clean cut-out",
+    )
+    masks.add_argument(
+        "--mask-sfm", action="store_true", help="also mask SfM feature extraction (COLMAP/builtin)"
+    )
+    parser.add_argument(
+        "--appearance",
+        action="store_true",
+        help="learn per-image exposure / white-balance compensation",
+    )
+    parser.add_argument(
+        "--depth-prior",
+        action="store_true",
+        help="depth + normal prior losses from the DA3 pose stage's depth maps",
+    )
     parser.add_argument(
         "--overwrite", action="store_true", help="recompute all stages, ignoring cached outputs"
     )
@@ -115,6 +142,12 @@ def main(argv: list[str] | None = None) -> None:
         viewer_open_browser=not args.no_browser,
         keep_open=args.keep_open,
         low_memory=args.low_mem,
+        masks=args.masks,
+        masks_from_alpha=args.masks_from_alpha,
+        alpha_mode=args.alpha_mode,
+        mask_sfm=args.mask_sfm,
+        appearance=args.appearance,
+        depth_prior=args.depth_prior,
         overwrite=args.overwrite,
         seed=args.seed,
     )
