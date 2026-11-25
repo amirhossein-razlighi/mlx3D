@@ -51,6 +51,11 @@ dev = [
   "mkdocs-material>=9.5",
   "mkdocstrings[python]>=0.24",
 ]
+models = [
+  # Downloads pretrained weights for `mlx3d.models` (Depth Anything 3, ...).
+  # Not needed when weights are passed as local files.
+  "huggingface-hub>=0.24",
+]
 
 [dependency-groups]
 dev = [
