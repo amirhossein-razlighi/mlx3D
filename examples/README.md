@@ -39,6 +39,7 @@ loaders in `mlx3d.datasets`.
 | [`train_ngp_nerf.py`](train_ngp_nerf.py) | NeRF (hash grid, fast) | A NeRF-synthetic scene; converges in minutes via `HashGridNeRF`. |
 | [`train_gaussian_splatting.py`](train_gaussian_splatting.py) | Gaussian splatting | A COLMAP scene (`sparse/0` + `images`) or a Blender scene. |
 | [`benchmark_gaussian_splatting.py`](benchmark_gaussian_splatting.py) | Profiling | A COLMAP scene; reports startup/train/render timings and memory. |
+| [`predict_geometry.py`](predict_geometry.py) | Feed-forward geometry | Any folder of photos; Depth Anything 3 depth + cameras, fused `points.ply`, fly-through video (needs `--extra models`). |
 
 A standalone, no-data micro-benchmark of all render paths is in
 [`benchmark.py`](benchmark.py) — see the [Benchmarks](../docs/benchmarks.md) page.

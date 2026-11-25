@@ -20,6 +20,7 @@ MLX3D brings the PyTorch3D workflow to Macs: batched 3D data structures, cameras
 - **NeRF** — positional encoding, the NeRF MLP, stratified + hierarchical sampling and volume rendering, with a training script for the Blender synthetic scenes.
 - **Mesh rendering** — differentiable soft triangle rasterization, OBJ/MTL texture loading and UV sampling, plus scalar-field mesh extraction.
 - **3D Gaussian Splatting** — a Metal translation of the reference CUDA rasterizer: tile-based forward and backward kernels wrapped in `mx.custom_function`, EWA and 3DGUT-style UT projection, spherical harmonics, anti-aliased and arbitrary feature rendering, adaptive density control, COLMAP loading, and standard `.ply` checkpoints viewable in any splat viewer.
+- **Feed-forward geometry** — [Depth Anything 3](tutorials/feedforward_geometry.md): photos → per-view depth, intrinsics and poses in one forward pass, with official pretrained weights.
 - **Interactive viewer** — [`mlx3d-view`](viewer.md) opens any 3DGS checkpoint in the browser with orbit/pan/zoom, rendered live by the Metal kernels; NeRFs are supported too.
 - **IO** — OBJ and PLY (ascii/binary) loading and saving, including 3DGS checkpoint layouts.
 
