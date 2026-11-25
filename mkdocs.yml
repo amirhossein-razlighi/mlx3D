@@ -65,6 +65,7 @@ nav:
       - Benchmarks: benchmarks.md
   - Tutorials:
       - "Photos → Splat in Minutes": tutorials/capture.md
+      - "Photos → Depth & Cameras": tutorials/feedforward_geometry.md
       - Mesh Optimization: tutorials/mesh_optimization.md
       - Mesh Rendering and Extraction: tutorials/mesh_rendering.md
       - Mesh Lighting and Shading: tutorials/mesh_lighting.md
@@ -86,5 +87,6 @@ nav:
       - Gaussian Splatting: api/splatting.md
       - Datasets: api/datasets.md
       - Capture: api/capture.md
+      - Models: api/models.md
       - Viewer: api/viewer.md
       - Utils: api/utils.md

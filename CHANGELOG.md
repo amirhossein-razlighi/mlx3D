@@ -4,6 +4,12 @@
 
 ### Changed
 
+- `mlx3d-capture --poses auto` now prefers Depth Anything 3 when the
+  `[models]` extra is installed, then COLMAP, then the built-in SfM.
+- `mlx3d-capture` initializes splat scales from nearest-neighbor spacing
+  against up to 100k reference points (was 10k). On dense clouds the old
+  subsample inflated every initial splat several-fold, making early training
+  steps up to ~10x slower.
 - Faster Gaussian tile binning (`bin_gaussians`), on the critical path of every
   render and training step. The default path now fuses expansion and
   range-finding into two Metal kernels — tile duplicates are emitted in depth
@@ -15,6 +21,23 @@
 
 ### Added
 
+- `mlx3d.models.DepthAnything3`: an MLX port of the Depth Anything 3
+  feed-forward geometry model. From any number of views of a static scene,
+  one forward pass predicts per-view depth, confidence, intrinsics and
+  world-to-camera poses (`GeometryPrediction`, with `cameras()`,
+  `world_points()`, `point_cloud()` and `to_pointclouds()` helpers). Loads the
+  official checkpoints (`da3-small` / `da3-base`, Apache-2.0; `da3-large`,
+  CC BY-NC) through an exhaustive, strict weight conversion; backbone in
+  float32 or half precision, and matches the official PyTorch implementation
+  to ~1e-6 relative error on every output. Sequences longer than `max_views` run in
+  anchored chunks aligned by a similarity fit on shared anchor cameras.
+  Weight downloads need the new optional `[models]` extra (`huggingface_hub`).
+- `mlx3d-capture --poses da3 [--pose-model da3-small]`: feed-forward camera
+  poses and a dense fused point cloud as the capture pipeline's pose stage
+  (`mlx3d.capture.run_feedforward_poses`), with joint pose refinement on by
+  default.
+- `examples/predict_geometry.py`: photos → depth maps, fused `points.ply`,
+  and a fly-through video; plus the "Photos → Depth & Cameras" tutorial.
 - Type support: mlx3d now ships a `py.typed` marker, so downstream projects
   get its inline type hints under mypy / pyright.
 - Finite-difference gradient check for the Metal Gaussian rasterizer's

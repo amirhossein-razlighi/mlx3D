@@ -26,6 +26,7 @@ MLX3D brings the PyTorch3D workflow to Macs: batched 3D data structures, cameras
 - **NeRF** — positional encoding, the NeRF MLP, stratified + hierarchical sampling, volume rendering, Blender-synthetic dataset loader.
 - **Mesh rendering** — differentiable soft triangle rasterization, UV texture sampling for OBJ/MTL assets, and scalar-field mesh extraction.
 - **Gaussian Splatting** — a Metal translation of the reference CUDA rasterizer (tile-based forward & backward kernels wrapped in `mx.custom_function`), EWA projection, spherical harmonics, anti-aliased and arbitrary feature rendering, adaptive density control, COLMAP loading, and standard 3DGS `.ply` checkpoints. ~30 FPS forward at 720p with 100k Gaussians on an M-series GPU.
+- **Feed-forward geometry** — [Depth Anything 3](https://amirhossein-razlighi.github.io/mlx3D/tutorials/feedforward_geometry/) on the Apple GPU: any number of photos → per-view depth, confidence, intrinsics and poses in one forward pass, with official Apache-2.0 weights, fused point clouds, and anchored chunking for long videos.
 - **Capture pipeline** — `mlx3d-capture photos_or_video` goes from raw photos or a phone video to a trained splat in one resumable command: sharp-frame selection, COLMAP or built-in COLMAP-free SfM (with joint pose refinement during training), live training preview, and a compacted `.ply` export.
 - **Fast splat viewing** — a forward-only rasterization path (`FastGaussianRenderer`, `mlx3d-view --fast`) with fused Metal geometry kernels, cross-frame caching, and sync-free frames: 1.5–2× faster than the training rasterizer on real scenes (up to 3.7× for large splats) at 45+ dB parity, and 67 fps playback of dynamic **4D Gaussian** sequences.
 - **Interactive viewer** — `mlx3d-view point_cloud.ply` opens a browser viewer with orbit/pan/zoom; frames are rendered on the Apple GPU by the Metal rasterizer and streamed live. Works for NeRFs too.
@@ -58,9 +59,11 @@ mlx3d-capture ./my_photos/          # or: mlx3d-capture walkaround.mp4
 This runs the whole pipeline: frame extraction (with automatic motion-blur
 filtering for video) → camera poses → 3DGS training with a **live browser
 viewer** → a compacted `splat.ply` you can open in any splat viewer. Poses
-come from COLMAP when it's installed (`brew install colmap`); otherwise
-mlx3d's **built-in COLMAP-free SfM** (`pip install "mlx3d[capture]"`) handles
-them and the trainer refines poses jointly with the splats. Stages are cached,
+come from feed-forward **Depth Anything 3** by default
+(`pip install "mlx3d[models]"`), otherwise from COLMAP when it's installed
+(`brew install colmap`) or mlx3d's **built-in COLMAP-free SfM**
+(`pip install "mlx3d[capture]"`); the trainer refines estimated poses jointly
+with the splats. Stages are cached,
 so re-runs resume where they left off.
 
 ```bash
@@ -107,6 +110,25 @@ from mlx3d.splatting import FastGaussianRenderer
 renderer = FastGaussianRenderer(model)     # caches activations, covariances, SH colors
 out = renderer.render(camera)              # forward-only: {"image", "alpha"}
 ```
+
+Predict depth and cameras for a set of photos in one forward pass:
+
+```python
+from mlx3d.models import DepthAnything3
+
+model = DepthAnything3.from_pretrained("da3-base")   # pip install "mlx3d[models]"
+pred = model.predict(["0.jpg", "1.jpg", "2.jpg"])
+pred.depth, pred.cameras()                           # (S, H, W) depth, list[Camera]
+points, colors = pred.point_cloud()                  # fused colored point cloud
+```
+
+<p align="center">
+  <img src="./docs/assets/da3_garden_depth.jpg" width="90%" alt="Garden photos and their Depth Anything 3 depth maps" />
+  <br/>
+  <img src="./docs/assets/da3_garden_flythrough_strip.jpg" width="90%" alt="Point cloud fused from 24 predicted depth maps" />
+  <br/>
+  <em>Depth Anything 3 on the Apple GPU: 24 photos → depth and cameras in 5 s (top), fused into one point cloud through the predicted poses (bottom).</em>
+</p>
 
 More in the docs: [mesh optimization](https://amirhossein-razlighi.github.io/mlx3D/tutorials/mesh_optimization/), [point cloud fitting](https://amirhossein-razlighi.github.io/mlx3D/tutorials/pointcloud_fitting/), [NeRF](https://amirhossein-razlighi.github.io/mlx3D/tutorials/nerf/), [Gaussian Splatting](https://amirhossein-razlighi.github.io/mlx3D/tutorials/gaussian_splatting/).
 

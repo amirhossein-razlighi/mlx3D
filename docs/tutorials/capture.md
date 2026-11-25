@@ -14,9 +14,11 @@ That single command runs the whole pipeline:
 1. **Frames** — photos are used as-is; videos are sampled with ffmpeg and
    motion-blurred frames are dropped automatically (the sharpest frame per
    time bucket wins, scored by variance of Laplacian).
-2. **Camera poses** — COLMAP if it is installed, otherwise mlx3d's built-in
-   COLMAP-free structure-from-motion (see below). Either way the poses land in
-   the standard COLMAP binary format under `<out>/sparse/0`.
+2. **Camera poses** — the feed-forward
+   [Depth Anything 3](feedforward_geometry.md) model by default (with the
+   `models` extra), otherwise COLMAP if it is installed, otherwise mlx3d's
+   built-in COLMAP-free structure-from-motion (see below). Either way the
+   poses land in the standard COLMAP binary format under `<out>/sparse/0`.
 3. **Training** — 3D Gaussian Splatting on the Apple GPU, with a **live
    browser viewer** that opens automatically so you can watch the splat
    converge in real time.
@@ -34,8 +36,9 @@ pip install mlx3d
 # for videos (frame extraction):
 brew install ffmpeg
 
-# pick ONE of the two pose engines:
-brew install colmap                  # best quality, handles hard captures
+# pose engine (auto picks the first one available):
+pip install "mlx3d[models]"          # Depth Anything 3 — the default, most robust
+brew install colmap                  # classical SfM, precise on texture-rich captures
 pip install "mlx3d[capture]"         # built-in SfM (OpenCV + SciPy), no COLMAP needed
 ```
 
@@ -56,6 +59,7 @@ The usual photogrammetry rules apply:
 mlx3d-capture ./my_photos/ --quality fast        # quick preview (~3k iters)
 mlx3d-capture ./my_photos/ --quality best        # 30k iters, full resolution
 mlx3d-capture clip.mp4 --frames 200              # keep more video frames
+mlx3d-capture ./my_photos/ --poses colmap        # force COLMAP
 mlx3d-capture ./my_photos/ --poses builtin       # force the built-in SfM
 mlx3d-capture ./my_photos/ --no-viewer           # headless (CI, ssh)
 mlx3d-capture ./my_photos/ --low-mem             # 8–16 GB machines
@@ -68,9 +72,9 @@ and SH degree (`fast` = 3k iters / 960 px, `balanced` = 7k / 1280 px,
 (`--iters`, `--max-dim`, `--sh-degree`, `--method mcmc`, ...); see
 `mlx3d-capture --help`.
 
-## COLMAP-free poses: the built-in SfM
+## Classical poses: the built-in SfM
 
-If COLMAP is not installed, mlx3d estimates poses itself with a compact
+Without the `models` extra and without COLMAP, mlx3d estimates poses itself with a compact
 classical SfM pipeline (`mlx3d.capture.run_sfm`):
 
 - SIFT features + ratio-test matching — exhaustive for small captures,
@@ -95,6 +99,33 @@ On a synthetic 24-view benchmark the built-in SfM recovers camera centers
 within 0.3% of the orbit radius, rotations within ~0.5°, and the focal length
 within 1% — and it reconstructs real captures (e.g. the 11-photo Sceaux Castle
 dataset) end to end in a few minutes on an M-series laptop.
+
+## Default poses: Depth Anything 3
+
+By default (`--poses auto`, with the `models` extra installed) matching and
+bundle adjustment are replaced by one pass of the
+[Depth Anything 3](feedforward_geometry.md) network, which predicts every
+frame's intrinsics, pose and depth at once. Its fused depth maps also seed
+the splats with a dense point cloud instead of sparse SfM points. Because it
+does not need texture or overlap to register a frame, it is the most robust
+choice for **few photos, low-texture scenes or blurry video**; joint pose
+refinement is on by default to tighten its poses during training.
+
+```bash
+mlx3d-capture ./my_photos/                             # DA3-Base (Apache-2.0)
+mlx3d-capture walk.mp4 --pose-model da3-small          # ~2x faster pose stage
+```
+
+<p align="center">
+  <img src="../../assets/capture_garden_da3.jpg" width="90%" alt="Input photo next to the trained splat rendered from the same pose" />
+  <br/>
+  <em>24 photos of a garden orbit, posed by DA3-Base in 7 s, then
+  <code>--quality fast</code> training: an input photo (left) and the splat
+  from the same refined pose (right).</em>
+</p>
+
+Long videos are processed in anchored chunks of 32 frames, so pose estimation
+stays fast for hundreds of frames.
 
 ## Python API
 
@@ -143,6 +174,6 @@ captures/scene/
   automatically; training proceeds with the rest.
 - **Poor quality with built-in poses** — install COLMAP (`brew install
   colmap`); the pipeline picks it up automatically, and `--overwrite` redoes
-  the pose stage.
+  the pose stage. On sparse or low-texture captures, use `--poses da3`.
 - **Out of memory** — add `--low-mem`, or lower `--max-dim` / use
   `--quality fast`.

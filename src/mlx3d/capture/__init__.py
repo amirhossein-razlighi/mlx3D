@@ -1,6 +1,7 @@
 """One-command capture pipeline: photos or video -> poses -> 3DGS -> PLY."""
 
 from .colmap_wrap import has_colmap, run_colmap
+from .feedforward import FeedForwardConfig, FeedForwardResult, run_feedforward_poses
 from .frames import (
     estimate_focal_px,
     extract_video_frames,
@@ -14,6 +15,8 @@ from .sfm import SfmConfig, SfmResult, run_sfm
 
 __all__ = [
     "CaptureConfig",
+    "FeedForwardConfig",
+    "FeedForwardResult",
     "QUALITY_PRESETS",
     "SfmConfig",
     "SfmResult",
@@ -24,6 +27,7 @@ __all__ = [
     "list_images",
     "run_capture",
     "run_colmap",
+    "run_feedforward_poses",
     "run_sfm",
     "select_sharpest",
     "sharpness_score",
