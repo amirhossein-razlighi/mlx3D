@@ -75,6 +75,20 @@ class CaptureConfig:
     keep_open: bool = False
     """Keep the live viewer alive after training finishes."""
     low_memory: bool = False
+    masks: str | None = None
+    """Foreground masks directory (COLMAP layout: ``<name>.png``) for training."""
+    masks_from_alpha: bool = False
+    """Use the input images' alpha channel as foreground masks."""
+    alpha_mode: str = "masked"
+    """Mask semantics: ``masked`` (ignore the background) or ``transparent``
+    (train a cut-out: background pixels must be empty)."""
+    mask_sfm: bool = False
+    """Also restrict SfM feature extraction to the masks (COLMAP / built-in).
+    Off by default: background features often help pose recovery."""
+    appearance: bool = False
+    """Learn per-view exposure / white-balance compensation."""
+    depth_prior: bool = False
+    """Depth + normal prior losses from the DA3 pose stage's depth maps."""
     image_cache: str = "uint8"
     save_every: int = 1000
     compact_min_opacity: float = 0.005
@@ -152,6 +166,29 @@ def _auto_pose_method() -> tuple[str, str]:
     return "builtin", 'built-in SfM; pip install "mlx3d[models]" for Depth Anything 3'
 
 
+def _masks_dir(cfg: CaptureConfig) -> str | None:
+    return os.path.abspath(os.path.expanduser(cfg.masks)) if cfg.masks else None
+
+
+def _sfm_mask_dir(cfg: CaptureConfig) -> str | None:
+    if not cfg.mask_sfm:
+        return None
+    if cfg.masks_from_alpha:
+        raise ValueError("--mask-sfm needs a --masks directory (COLMAP reads mask files).")
+    return _masks_dir(cfg)
+
+
+def _sfm_mask_paths(cfg: CaptureConfig, images: list[str]) -> list[str | None] | None:
+    if not cfg.mask_sfm:
+        return None
+    if cfg.masks_from_alpha:
+        return list(images)
+    from ..datasets import find_mask_file
+
+    masks_dir = _masks_dir(cfg)
+    return [find_mask_file(masks_dir, os.path.basename(p)) for p in images]
+
+
 def _stage_poses(images_dir: str, out: str, cfg: CaptureConfig, source: str, log) -> dict:
     sparse = os.path.join(out, "sparse", "0")
     complete = all(
@@ -179,12 +216,13 @@ def _stage_poses(images_dir: str, out: str, cfg: CaptureConfig, source: str, log
             )
         n = len(list_images(images_dir))
         sequential = source == "video" and n > 60
-        run_colmap(images_dir, out, sequential=sequential, log=log)
+        run_colmap(images_dir, out, sequential=sequential, mask_path=_sfm_mask_dir(cfg), log=log)
         return {"method": "colmap", "sequential": sequential}
     if method == "builtin":
         from .sfm import run_sfm
 
-        result = run_sfm(list_images(images_dir), out, log=log)
+        images = list_images(images_dir)
+        result = run_sfm(images, out, log=log, mask_paths=_sfm_mask_paths(cfg, images))
         return {
             "method": "builtin",
             "registered": len(result.registered),
@@ -206,6 +244,24 @@ def _stage_poses(images_dir: str, out: str, cfg: CaptureConfig, source: str, log
     raise ValueError(f"Unknown pose method {cfg.poses!r}.")
 
 
+def _load_depth_priors(out: str, ds, cfg: CaptureConfig, log) -> list | None:
+    """Per-view DA3 depth priors at training resolution, if requested."""
+    if not cfg.depth_prior:
+        return None
+    from .feedforward import DEPTH_DIR, load_depth_prior
+
+    depth_dir = os.path.join(out, DEPTH_DIR)
+    paths = [os.path.join(depth_dir, f"{name}.npy") for name in ds.image_names]
+    missing = [p for p in paths if not os.path.isfile(p)]
+    if missing:
+        raise RuntimeError(
+            f"--depth-prior needs DA3 depth maps in {depth_dir} (written by the da3 pose "
+            f"stage); {len(missing)} are missing. Re-run with --poses da3 --overwrite."
+        )
+    log("Depth + normal priors: on (DA3 depth)")
+    return [load_depth_prior(p, (c.width, c.height)) for p, c in zip(paths, ds.cameras)]
+
+
 def _auto_downscale(images_dir: str, max_dim: int) -> int:
     from PIL import Image
 
@@ -220,7 +276,7 @@ def _stage_train(out: str, images_dir: str, cfg: CaptureConfig, pose_info: dict,
 
     from ..cameras import refine_camera
     from ..datasets import load_colmap, save_colmap
-    from ..losses import psnr
+    from ..losses import masked_psnr, psnr
     from ..splatting import GaussianModel, GaussianTrainer, TrainerConfig
 
     if cfg.seed >= 0:
@@ -228,7 +284,17 @@ def _stage_train(out: str, images_dir: str, cfg: CaptureConfig, pose_info: dict,
         mx.random.seed(cfg.seed)
 
     downscale = _auto_downscale(images_dir, cfg.train_max_dim)
-    ds = load_colmap(out, images_dir=images_dir, downscale=downscale, cache=cfg.image_cache)
+    ds = load_colmap(
+        out,
+        images_dir=images_dir,
+        downscale=downscale,
+        cache=cfg.image_cache,
+        masks_dir=_masks_dir(cfg),
+        masks_from_alpha=cfg.masks_from_alpha,
+    )
+    if ds.masks is not None:
+        log(f"Foreground masks: {cfg.alpha_mode} mode")
+    depth_priors = _load_depth_priors(out, ds, cfg, log)
     if len(ds) < 3:
         raise RuntimeError(f"Only {len(ds)} posed views available; need at least 3.")
     scene_extent = ds.scene_extent
@@ -268,8 +334,13 @@ def _stage_train(out: str, images_dir: str, cfg: CaptureConfig, pose_info: dict,
         max_gaussians=1_200_000 if cfg.low_memory else None,
         low_memory=cfg.low_memory,
         lr_means_max_steps=max(cfg.iters, 1),
+        alpha_mode=cfg.alpha_mode,
+        random_background=cfg.alpha_mode == "transparent",
+        appearance=cfg.appearance,
+        lambda_depth_prior=0.1 if depth_priors else 0.0,
+        lambda_normal_prior=0.05 if depth_priors else 0.0,
     )
-    trainer = GaussianTrainer(model, trainer_cfg, scene_extent=scene_extent)
+    trainer = GaussianTrainer(model, trainer_cfg, scene_extent=scene_extent, num_views=len(ds))
     log(f"Initialized {model.num_gaussians} Gaussians, training {cfg.iters} iterations")
 
     # Optional live viewer.
@@ -326,16 +397,21 @@ def _stage_train(out: str, images_dir: str, cfg: CaptureConfig, pose_info: dict,
         view_id = int(order[cursor])
         cursor += 1
         cam, img = ds[view_id]
+        extras = {
+            "mask": ds.masks[view_id] if ds.masks is not None else None,
+            "depth_prior": depth_priors[view_id] if depth_priors else None,
+            "view_index": view_id,
+        }
 
         if twists is not None:
             twist_opt.learning_rate = _pose_twist_lr(it, cfg.iters)
-            info = trainer.step(cam, img, twist=twists[view_id])
+            info = trainer.step(cam, img, twist=twists[view_id], **extras)
             twists[view_id] = twist_opt.apply_gradients(
                 {"t": info["twist_grad"]}, {"t": twists[view_id]}
             )["t"]
             mx.eval(twists[view_id])
         else:
-            info = trainer.step(cam, img)
+            info = trainer.step(cam, img, **extras)
 
         if pbar is not None:
             pbar.update(1)
@@ -385,7 +461,14 @@ def _stage_train(out: str, images_dir: str, cfg: CaptureConfig, pose_info: dict,
     for k, view_id in enumerate(np.linspace(0, len(ds) - 1, n_eval, dtype=int)):
         cam, img = refined_cams[int(view_id)], ds.images[int(view_id)]
         outp = model.render(cam, background=bg)
-        psnrs.append(float(psnr(outp["image"], img)))
+        if ds.masks is None:
+            psnrs.append(float(psnr(outp["image"], img)))
+        else:
+            mask = ds.masks[int(view_id)]
+            if cfg.alpha_mode == "transparent":
+                img = img * mask[..., None]  # composited over the black eval background
+                mask = mx.ones_like(mask)
+            psnrs.append(float(masked_psnr(outp["image"], img, mask)))
         arr = (np.clip(np.array(outp["image"]), 0, 1) * 255).astype(np.uint8)
         Image.fromarray(arr).save(os.path.join(renders_dir, f"view_{int(view_id):04d}.png"))
     mean_psnr = float(np.mean(psnrs))

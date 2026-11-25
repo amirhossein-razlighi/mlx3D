@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fixed
+
+- Normal-based losses (the 2DGS normal-consistency loss and the new normal
+  prior) produced NaN gradients wherever a pixel's depth tangents vanish
+  (empty background): `linalg.norm` has a NaN gradient at zero, which a zero
+  mask weight does not cancel. Normalization is now zero-safe.
+
 ### Changed
 
 - `mlx3d-capture --poses auto` now prefers Depth Anything 3 when the
@@ -21,6 +28,28 @@
 
 ### Added
 
+- Foreground masks for Gaussian training (#28): `load_colmap(masks_dir=...,
+  masks_from_alpha=...)` loads COLMAP-layout masks (`<name>.png` or
+  `<stem>.png`; grayscale / RGB / RGBA) or the images' own alpha into a
+  `MaskCollection` aligned with every cache mode and downscale, failing early
+  on missing, empty or mis-sized masks. `GaussianTrainer.step(..., mask=)`
+  supports `alpha_mode="masked"` (coverage-normalized L1 + mask-aware SSIM;
+  background pixels get no loss or gradient; 2DGS geometry losses restricted
+  to the mask) and `"transparent"` (mask = target opacity: alpha supervision,
+  target composited over an optionally random background).
+- Mask-aware metrics `masked_l1`, `masked_psnr`, `masked_ssim` and a per-pixel
+  `ssim_map`; `mlx3d-eval --masks / --masks-from-alpha / --alpha-mode` reports
+  the matching metrics plus coverage, alpha MAE and foreground IoU.
+- Per-view appearance compensation (`TrainerConfig.appearance`): a learnable
+  affine color transform per image absorbs exposure / white-balance changes.
+- Geometry priors: `TrainerConfig.lambda_depth_prior` (scale/shift-invariant
+  Pearson depth correlation) and `lambda_normal_prior` (normals of rendered vs
+  prior depth) with `step(..., depth_prior=)`.
+- `mlx3d-capture --masks / --masks-from-alpha / --alpha-mode / --mask-sfm /
+  --appearance / --depth-prior`. The DA3 pose stage now saves per-frame depth
+  maps (`<out>/depth/`) for the priors; `--mask-sfm` opts into masked feature
+  extraction for COLMAP and the built-in SfM.
+- "Training on Real Captures" tutorial.
 - `mlx3d.models.DepthAnything3`: an MLX port of the Depth Anything 3
   feed-forward geometry model. From any number of views of a static scene,
   one forward pass predicts per-view depth, confidence, intrinsics and

@@ -46,6 +46,7 @@ def run_colmap(
     sequential: bool = False,
     camera_model: str = "OPENCV",
     single_camera: bool = True,
+    mask_path: str | None = None,
     log=print,
 ) -> str:
     """Run COLMAP SfM on ``images_dir`` and return the sparse model directory.
@@ -58,6 +59,8 @@ def run_colmap(
             instead of exhaustive matching.
         camera_model: COLMAP camera model for feature extraction.
         single_camera: share one camera across all images (same device).
+        mask_path: optional COLMAP mask directory (``<name>.png``, black =
+            no features) for feature extraction.
     """
     colmap = shutil.which("colmap")
     if colmap is None:
@@ -80,6 +83,7 @@ def run_colmap(
             camera_model,
             "--ImageReader.single_camera",
             "1" if single_camera else "0",
+            *(["--ImageReader.mask_path", mask_path] if mask_path else []),
         ],
         log_path,
         log,

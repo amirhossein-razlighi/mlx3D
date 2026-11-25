@@ -10,7 +10,7 @@ import mlx.core as mx
 import numpy as np
 
 from ..datasets import load_blender, load_colmap
-from ..losses import l1_loss, psnr, ssim
+from ..losses import l1_loss, masked_l1, masked_psnr, masked_ssim, psnr, ssim
 from ..splatting import GaussianModel
 
 
@@ -25,6 +25,13 @@ class EvalConfig:
     views: int | None = None
     antialias: bool = False
     white_background: bool | None = None
+    masks_dir: str | None = None
+    """COLMAP-layout foreground masks; metrics then follow ``alpha_mode``."""
+    masks_from_alpha: bool = False
+    alpha_mode: str = "masked"
+    """``masked``: coverage-normalized metrics inside the mask. ``transparent``:
+    full-frame metrics against the target composited over the background,
+    plus alpha MAE and foreground IoU."""
 
 
 def _view_indices(n: int, views: int | None) -> np.ndarray:
@@ -37,7 +44,16 @@ def _view_indices(n: int, views: int | None) -> np.ndarray:
 
 def _load_dataset(config: EvalConfig):
     if config.data_format == "colmap":
-        return load_colmap(config.data, downscale=config.downscale, cache=config.image_cache), False
+        ds = load_colmap(
+            config.data,
+            downscale=config.downscale,
+            cache=config.image_cache,
+            masks_dir=config.masks_dir,
+            masks_from_alpha=config.masks_from_alpha,
+        )
+        return ds, False
+    if config.masks_dir or config.masks_from_alpha:
+        raise ValueError("Masks are supported for COLMAP datasets.")
     if config.data_format == "blender":
         white = True if config.white_background is None else bool(config.white_background)
         return (
@@ -58,20 +74,44 @@ def evaluate_gaussian_checkpoint(config: EvalConfig) -> dict[str, object]:
     ds, default_white = _load_dataset(config)
     white = default_white if config.white_background is None else bool(config.white_background)
     bg = mx.ones((3,), dtype=mx.float32) if white else mx.zeros((3,), dtype=mx.float32)
+    if config.alpha_mode not in ("masked", "transparent"):
+        raise ValueError("alpha_mode must be 'masked' or 'transparent'.")
     model = GaussianModel.load_ply(config.checkpoint)
     indices = _view_indices(len(ds), config.views)
+    masks = getattr(ds, "masks", None)
 
     per_view = []
     for idx in indices:
         cam, target = ds[int(idx)]
-        pred = model.render(cam, background=bg, antialias=config.antialias)["image"]
-        metrics = {
-            "index": int(idx),
-            "psnr": float(psnr(pred, target)),
-            "ssim": float(ssim(pred, target)),
-            "l1": float(l1_loss(pred, target)),
-        }
-        per_view.append(metrics)
+        out = model.render(cam, background=bg, antialias=config.antialias)
+        pred = out["image"]
+        metrics = {"index": int(idx)}
+        if masks is None:
+            metrics.update(
+                psnr=psnr(pred, target), ssim=ssim(pred, target), l1=l1_loss(pred, target)
+            )
+        elif config.alpha_mode == "masked":
+            mask = masks[int(idx)]
+            metrics.update(
+                psnr=masked_psnr(pred, target, mask),
+                ssim=masked_ssim(pred, target, mask),
+                l1=masked_l1(pred, target, mask),
+                coverage=mask.mean(),
+            )
+        else:
+            mask = masks[int(idx)]
+            composite = target * mask[..., None] + bg * (1.0 - mask[..., None])
+            fg_pred, fg_true = out["alpha"] > 0.5, mask > 0.5
+            union = mx.logical_or(fg_pred, fg_true).sum()
+            metrics.update(
+                psnr=psnr(pred, composite),
+                ssim=ssim(pred, composite),
+                l1=l1_loss(pred, composite),
+                coverage=mask.mean(),
+                alpha_mae=mx.abs(out["alpha"] - mask).mean(),
+                iou=mx.logical_and(fg_pred, fg_true).sum() / mx.maximum(union, 1),
+            )
+        per_view.append({k: v if k == "index" else float(v) for k, v in metrics.items()})
 
     summary = {
         "checkpoint": config.checkpoint,
@@ -85,6 +125,11 @@ def evaluate_gaussian_checkpoint(config: EvalConfig) -> dict[str, object]:
         "l1": float(np.mean([m["l1"] for m in per_view])),
         "per_view": per_view,
     }
+    if masks is not None:
+        summary["alpha_mode"] = config.alpha_mode
+        for key in ("coverage", "alpha_mae", "iou"):
+            if key in per_view[0]:
+                summary[key] = float(np.mean([m[key] for m in per_view]))
     return summary
 
 
@@ -102,6 +147,19 @@ def build_parser() -> argparse.ArgumentParser:
     bg.add_argument("--white-background", action="store_true", dest="white_background")
     bg.add_argument("--black-background", action="store_false", dest="white_background")
     parser.set_defaults(white_background=None)
+    masks = parser.add_mutually_exclusive_group()
+    masks.add_argument(
+        "--masks", dest="masks_dir", help="foreground masks directory (COLMAP layout)"
+    )
+    masks.add_argument(
+        "--masks-from-alpha", action="store_true", help="use the images' alpha channel as masks"
+    )
+    parser.add_argument(
+        "--alpha-mode",
+        choices=["masked", "transparent"],
+        default="masked",
+        help="mask semantics, matching training (default: masked)",
+    )
     parser.add_argument("--json-out", help="optional path for JSON metrics")
     return parser
 
@@ -125,6 +183,9 @@ def main(argv: list[str] | None = None) -> None:
             views=args.views,
             antialias=args.antialias,
             white_background=args.white_background,
+            masks_dir=args.masks_dir,
+            masks_from_alpha=args.masks_from_alpha,
+            alpha_mode=args.alpha_mode,
         )
     )
     text = json.dumps(result, indent=2, sort_keys=True)

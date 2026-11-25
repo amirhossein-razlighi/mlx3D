@@ -272,11 +272,14 @@ def run_sfm(
     out_root: str,
     config: SfmConfig | None = None,
     log=print,
+    mask_paths: list[str | None] | None = None,
 ) -> SfmResult:
     """Estimate camera poses + sparse points for ``image_paths``.
 
     Writes a COLMAP binary sparse model under ``out_root/sparse/0`` (only
     registered images are included) and returns an :class:`SfmResult`.
+    ``mask_paths`` optionally restricts feature detection per image (mask
+    value > 0.5 = keep); ``None`` entries leave that image unmasked.
     """
     cv2 = _import_cv2()
     from ..datasets import save_colmap
@@ -301,9 +304,11 @@ def run_sfm(
         f"focal prior {focal_prior:.0f} px ({focal_source})"
     )
 
+    if mask_paths is not None and len(mask_paths) != len(image_paths):
+        raise ValueError("mask_paths needs one entry per image.")
     sift = cv2.SIFT_create(nfeatures=cfg.n_features)
     keypoints, descriptors, colors = [], [], []
-    for p in image_paths:
+    for k, p in enumerate(image_paths):
         with Image.open(p) as img:
             if img.size != (orig_w, orig_h):
                 raise ValueError(
@@ -313,7 +318,14 @@ def run_sfm(
                 )
             rgb = np.asarray(img.convert("RGB").resize((w, h), Image.BILINEAR))
         gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-        kps, desc = sift.detectAndCompute(gray, None)
+        feature_mask = None
+        if mask_paths is not None and mask_paths[k] is not None:
+            from ..datasets import decode_mask_file
+
+            mask = decode_mask_file(mask_paths[k])
+            mask = np.asarray(Image.fromarray((mask * 255).astype(np.uint8)).resize((w, h)))
+            feature_mask = ((mask > 127) * 255).astype(np.uint8)
+        kps, desc = sift.detectAndCompute(gray, feature_mask)
         if desc is None or len(kps) < 10:
             kps, desc = [], np.zeros((0, 128), dtype=np.float32)
         pts = np.array([kp.pt for kp in kps], dtype=np.float64).reshape(-1, 2)
