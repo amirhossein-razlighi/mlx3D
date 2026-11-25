@@ -111,3 +111,52 @@ def test_eval_cli_writes_json(tmp_path, capsys):
 def test_eval_cli_validates_args(tmp_path):
     with pytest.raises(SystemExit):
         main(["missing.ply", "--data", str(tmp_path), "--downscale", "0"])
+
+
+def _write_masked_colmap_scene(tmp_path, model: GaussianModel, n: int = 2):
+    """Targets are clean renders inside the model's silhouette and noise outside."""
+    from PIL import Image
+
+    from mlx3d.datasets import save_colmap
+
+    cam = Camera(
+        R=mx.array([[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]]),
+        t=mx.zeros((3,)),
+        fx=27.7,
+        fy=27.7,
+        cx=16.0,
+        cy=16.0,
+        width=32,
+        height=32,
+    )
+    (tmp_path / "images").mkdir()
+    (tmp_path / "masks").mkdir()
+    rng = np.random.default_rng(0)
+    names = []
+    for i in range(n):
+        out = model.render(cam, background=mx.zeros((3,)))
+        mask = (np.array(out["alpha"]) > 0.5).astype(np.float32)
+        image = np.array(out["image"]) * mask[..., None]
+        noisy = np.where(mask[..., None] > 0, image, rng.uniform(size=image.shape))
+        name = f"v{i}.png"
+        Image.fromarray((noisy * 255 + 0.5).astype(np.uint8)).save(tmp_path / "images" / name)
+        Image.fromarray((mask * 255).astype(np.uint8)).save(tmp_path / "masks" / f"{name}.png")
+        names.append(name)
+    save_colmap(str(tmp_path), [cam] * n, names, np.zeros((3, 3)), np.ones((3, 3)))
+
+
+def test_eval_masked_and_transparent_modes(tmp_path):
+    ckpt, model = _tiny_checkpoint(tmp_path)
+    _write_masked_colmap_scene(tmp_path, model)
+    base = dict(checkpoint=ckpt, data=str(tmp_path), image_cache="uint8")
+
+    full = evaluate_gaussian_checkpoint(EvalConfig(**base))
+    masked = evaluate_gaussian_checkpoint(EvalConfig(**base, masks_dir="masks"))
+    transparent = evaluate_gaussian_checkpoint(
+        EvalConfig(**base, masks_dir="masks", alpha_mode="transparent")
+    )
+    assert full["psnr"] < 20.0  # background noise dominates the full frame
+    assert masked["psnr"] > 35.0  # ...but is excluded in masked mode
+    assert masked["alpha_mode"] == "masked" and 0.0 < masked["coverage"] < 1.0
+    assert transparent["psnr"] > 25.0
+    assert transparent["iou"] > 0.9 and transparent["alpha_mae"] < 0.2
