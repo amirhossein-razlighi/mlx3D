@@ -300,6 +300,52 @@ def test_capture_cli_parser_defaults():
     assert args.quality == "fast" and args.no_viewer
     assert _default_out("clips/walk.mp4") == os.path.join("captures", "walk")
     assert _default_out("./my_photos/") == os.path.join("captures", "my_photos")
+    args = build_parser().parse_args(["p/", "--poses", "da3", "--pose-model", "da3-small"])
+    assert (args.poses, args.pose_model) == ("da3", "da3-small")
+
+
+def test_da3_pose_stage_writes_colmap_model(tmp_path, monkeypatch):
+    """``poses="da3"`` routes through the feed-forward stage, whose COLMAP
+    output loads like SfM output (model swapped for a stub prediction)."""
+    import mlx3d.models
+    from mlx3d.capture.pipeline import CaptureConfig, _stage_poses
+    from mlx3d.models.depth_anything3 import GeometryPrediction
+
+    w, h = 48, 32
+    images = tmp_path / "images"
+    images.mkdir()
+    for i in range(3):
+        Image.fromarray(np.full((h, w, 3), 40 * i, dtype=np.uint8)).save(images / f"{i}.png")
+
+    class StubModel:
+        @classmethod
+        def from_pretrained(cls, name):
+            assert name == "da3-small"
+            return cls()
+
+        def predict(self, paths, **kwargs):
+            n = len(paths)
+            K = mx.array([[20.0, 0, 7.0], [0, 20.0, 7.0], [0, 0, 1]])
+            return GeometryPrediction(
+                depth=mx.full((n, 14, 14), 2.0),
+                depth_conf=mx.full((n, 14, 14), 3.0),
+                R=mx.broadcast_to(mx.eye(3), (n, 3, 3)),
+                t=mx.array([[float(i), 0.0, 0.0] for i in range(n)]),
+                K=mx.broadcast_to(K, (n, 3, 3)),
+                rgb=np.zeros((n, 14, 14, 3), dtype=np.uint8),
+                original_sizes=[(w, h)] * n,
+            )
+
+    monkeypatch.setattr(mlx3d.models, "DepthAnything3", StubModel)
+    cfg = CaptureConfig(poses="da3", pose_model="da3-small")
+    info = _stage_poses(str(images), str(tmp_path), cfg, "photos", log=lambda *a: None)
+    assert info["method"] == "da3" and info["registered"] == 3
+
+    ds = load_colmap(str(tmp_path), images_dir=str(images))
+    assert len(ds) == 3 and ds.points.shape[0] > 0
+    cam, _ = ds[0]
+    assert (cam.width, cam.height) == (w, h)
+    assert cam.fx == pytest.approx(20.0 * w / 14) and cam.fy == pytest.approx(20.0 * h / 14)
 
 
 def test_run_capture_end_to_end_builtin_poses(tmp_path):
@@ -324,3 +370,25 @@ def test_run_capture_end_to_end_builtin_poses(tmp_path):
     # Re-running resumes: the pose stage is reused, not recomputed.
     summary2 = run_capture(img_dir, out, cfg, log=lambda *_: None)
     assert summary2["stages"]["poses"]["method"] == "existing"
+
+
+def test_auto_pose_method_prefers_da3(monkeypatch):
+    import importlib.util
+
+    import mlx3d.capture.pipeline as pipeline
+
+    real_find_spec = importlib.util.find_spec
+
+    def find_spec(name, *args):
+        if name == "huggingface_hub":
+            return object() if has_hub else None
+        return real_find_spec(name, *args)
+
+    monkeypatch.setattr(importlib.util, "find_spec", find_spec)
+    for has_hub, has_colmap, expected in [
+        (True, True, "da3"),
+        (False, True, "colmap"),
+        (False, False, "builtin"),
+    ]:
+        monkeypatch.setattr(pipeline, "has_colmap", lambda value=has_colmap: value)
+        assert pipeline._auto_pose_method()[0] == expected

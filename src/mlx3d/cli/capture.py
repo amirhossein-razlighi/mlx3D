@@ -3,8 +3,9 @@
     mlx3d-capture ./my_photos/
     mlx3d-capture walkaround.mp4 --quality fast
 
-Runs frames -> camera poses (COLMAP if installed, otherwise the built-in
-SfM) -> 3DGS training with a live browser preview -> compacted splat.ply.
+Runs frames -> camera poses (feed-forward Depth Anything 3 with the
+"models" extra, otherwise COLMAP if installed, otherwise the built-in SfM)
+-> 3DGS training with a live browser preview -> compacted splat.ply.
 Stages are resumable: re-running skips work whose outputs already exist.
 """
 
@@ -14,6 +15,7 @@ import argparse
 import os
 
 from ..capture.pipeline import QUALITY_PRESETS, CaptureConfig, run_capture
+from ..models.depth_anything3.config import PRESETS as DA3_PRESETS
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,15 +38,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--poses",
-        choices=["auto", "colmap", "builtin", "existing"],
+        choices=["auto", "colmap", "builtin", "da3", "existing"],
         default="auto",
-        help="pose source: auto uses COLMAP when installed, else the built-in SfM (default: auto)",
+        help="pose source: auto uses Depth Anything 3 when mlx3d[models] is installed, "
+        "else COLMAP when installed, else the built-in SfM (default: auto)",
+    )
+    parser.add_argument(
+        "--pose-model",
+        choices=sorted(DA3_PRESETS),
+        default="da3-base",
+        help="Depth Anything 3 preset for --poses da3 (default: da3-base)",
     )
     parser.add_argument(
         "--refine-poses",
         choices=["auto", "on", "off"],
         default="auto",
-        help="jointly refine camera poses while training (auto: on for built-in SfM poses)",
+        help="jointly refine camera poses while training (auto: on for built-in SfM and DA3)",
     )
     parser.add_argument("--iters", type=int, default=None, help="override preset iterations")
     parser.add_argument(
@@ -94,6 +103,7 @@ def main(argv: list[str] | None = None) -> None:
     config = CaptureConfig(
         quality=args.quality,
         poses=args.poses,
+        pose_model=args.pose_model,
         refine_poses=args.refine_poses,
         iters=args.iters,
         num_frames=args.frames,

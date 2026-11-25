@@ -1,8 +1,8 @@
 """One-command capture pipeline: photos or video -> poses -> 3DGS -> PLY.
 
-Orchestrates the pieces that already exist in mlx3d (frame ingestion, COLMAP
-or built-in SfM, the Gaussian Splatting trainer, the live viewer, compaction)
-into a single resumable flow with sensible defaults:
+Orchestrates the pieces that already exist in mlx3d (frame ingestion, DA3,
+COLMAP or built-in SfM poses, the Gaussian Splatting trainer, the live viewer,
+compaction) into a single resumable flow with sensible defaults:
 
     from mlx3d.capture import run_capture
     run_capture("my_photos/", "captures/scene")
@@ -16,6 +16,7 @@ under the capture directory and are skipped on re-runs when already complete:
     <out>/capture.json  stage summary
 """
 
+import importlib.util
 import json
 import math
 import os
@@ -28,6 +29,10 @@ from .colmap_wrap import has_colmap, run_colmap
 from .frames import extract_video_frames, is_video, list_images
 
 __all__ = ["CaptureConfig", "QUALITY_PRESETS", "run_capture"]
+
+
+# Pose sources whose estimates benefit from joint refinement during training.
+_ESTIMATED_POSE_METHODS = ("builtin", "da3")
 
 
 @dataclass
@@ -50,11 +55,14 @@ class CaptureConfig:
     quality: str = "balanced"
     """Preset for iterations / resolution / frame count: fast, balanced, best."""
     poses: str = "auto"
-    """Pose source: ``auto`` (COLMAP if installed, else built-in SfM),
+    """Pose source: ``auto`` (Depth Anything 3 when the ``models`` extra is
+    installed, else COLMAP if installed, else built-in SfM), ``da3``,
     ``colmap``, ``builtin``, or ``existing`` (reuse ``<out>/sparse/0``)."""
+    pose_model: str = "da3-base"
+    """Depth Anything 3 preset used by ``poses="da3"``."""
     refine_poses: str = "auto"
     """Joint pose refinement during training: ``auto`` (on for built-in SfM
-    poses), ``on``, or ``off``."""
+    and DA3 poses), ``on``, or ``off``."""
     iters: int | None = None
     num_frames: int | None = None
     train_max_dim: int | None = None
@@ -130,6 +138,20 @@ def _stage_frames(input_path: str, out: str, cfg: CaptureConfig, log) -> tuple[s
     return frames_dir, {"source": "video", "count": len(frames)}
 
 
+def _auto_pose_method() -> tuple[str, str]:
+    """Pick the pose engine for ``poses="auto"`` and say why.
+
+    Depth Anything 3 is preferred: it registers every frame in one pass, even
+    on sparse or low-texture captures. It needs the ``models`` extra (for the
+    one-time weight download); without it, COLMAP, then the built-in SfM.
+    """
+    if importlib.util.find_spec("huggingface_hub") is not None:
+        return "da3", "Depth Anything 3"
+    if has_colmap():
+        return "colmap", 'COLMAP found; pip install "mlx3d[models]" for Depth Anything 3'
+    return "builtin", 'built-in SfM; pip install "mlx3d[models]" for Depth Anything 3'
+
+
 def _stage_poses(images_dir: str, out: str, cfg: CaptureConfig, source: str, log) -> dict:
     sparse = os.path.join(out, "sparse", "0")
     complete = all(
@@ -147,10 +169,8 @@ def _stage_poses(images_dir: str, out: str, cfg: CaptureConfig, source: str, log
 
     method = cfg.poses
     if method == "auto":
-        method = "colmap" if has_colmap() else "builtin"
-        log(
-            f"Pose method: {method} ({'COLMAP found' if method == 'colmap' else 'COLMAP not found'})"
-        )
+        method, reason = _auto_pose_method()
+        log(f"Pose method: {method} ({reason})")
     if method == "colmap":
         if not has_colmap():
             raise RuntimeError(
@@ -170,6 +190,18 @@ def _stage_poses(images_dir: str, out: str, cfg: CaptureConfig, source: str, log
             "registered": len(result.registered),
             "points": result.num_points,
             "mean_reproj_px": result.mean_reproj_px,
+        }
+    if method == "da3":
+        from .feedforward import FeedForwardConfig, run_feedforward_poses
+
+        result = run_feedforward_poses(
+            list_images(images_dir), out, FeedForwardConfig(model=cfg.pose_model), log=log
+        )
+        return {
+            "method": "da3",
+            "model": cfg.pose_model,
+            "registered": result.num_views,
+            "points": result.num_points,
         }
     raise ValueError(f"Unknown pose method {cfg.poses!r}.")
 
@@ -214,15 +246,20 @@ def _stage_train(out: str, images_dir: str, cfg: CaptureConfig, pose_info: dict,
         )
 
     refine = cfg.refine_poses == "on" or (
-        cfg.refine_poses == "auto" and pose_info.get("method") == "builtin"
+        cfg.refine_poses == "auto" and pose_info.get("method") in _ESTIMATED_POSE_METHODS
     )
     log(f"Pose refinement during training: {'on' if refine else 'off'}")
 
+    # Initial scales come from nearest-neighbor spacing. Measuring it against a
+    # small subsample of a dense cloud (e.g. DA3's depth-fused points) inflates
+    # every splat several-fold and makes early training steps ~10x slower, so
+    # use up to 100k reference points (a few seconds even for 1M-point clouds).
     model = GaussianModel.from_points(
         ds.points,
         ds.point_colors,
         sh_degree=cfg.sh_degree,
         scale_init_max_scale=0.01 * scene_extent,
+        scale_init_max_ref=min(int(ds.points.shape[0]), 100_000),
     )
     mx.eval(model.params)
     trainer_cfg = TrainerConfig(
