@@ -390,6 +390,9 @@ def test_run_capture_end_to_end_builtin_poses(tmp_path):
     # Re-running resumes: the pose stage is reused, not recomputed.
     summary2 = run_capture(img_dir, out, cfg, log=lambda *_: None)
     assert summary2["stages"]["poses"]["method"] == "existing"
+    # ...but remembers its source, so the estimated poses are still refined.
+    assert summary2["stages"]["poses"]["source"] == "builtin"
+    assert summary2["stages"]["train"]["pose_refined"] is True
 
 
 def test_auto_pose_method_prefers_da3(monkeypatch):
@@ -460,3 +463,31 @@ def test_run_capture_with_masks_appearance_and_priors(tmp_path):
         summary = run_capture(str(img_dir), out, cfg, log=lambda *_: None)
         assert np.isfinite(summary["stages"]["train"]["psnr_mean"])
         assert os.path.exists(os.path.join(out, "splat.ply"))
+
+
+def test_auto_poses_fall_back_when_da3_is_unavailable(tmp_path, monkeypatch):
+    """Offline before the first weight download: auto mode falls back to SfM,
+    an explicit --poses da3 still fails loudly."""
+    import mlx3d.capture.pipeline as pipeline
+    import mlx3d.capture.sfm as sfm
+
+    def offline(*args, **kwargs):
+        raise OSError("no network")
+
+    class Result:
+        registered, num_points, mean_reproj_px = ["a"], 1, 0.5
+
+    sfm_calls = []
+    monkeypatch.setattr(pipeline, "_auto_pose_method", lambda: ("da3", "test"))
+    monkeypatch.setattr(pipeline, "_da3_poses", offline)
+    monkeypatch.setattr(pipeline, "has_colmap", lambda: False)
+    monkeypatch.setattr(sfm, "run_sfm", lambda *a, **k: sfm_calls.append(a) or Result())
+    (tmp_path / "images").mkdir()
+    images, quiet = str(tmp_path / "images"), lambda *a: None
+
+    auto = pipeline.CaptureConfig(poses="auto")
+    info = pipeline._estimate_poses(images, str(tmp_path), auto, "photos", quiet)
+    assert info["method"] == "builtin" and len(sfm_calls) == 1
+    explicit = pipeline.CaptureConfig(poses="da3")
+    with pytest.raises(OSError, match="no network"):
+        pipeline._estimate_poses(images, str(tmp_path), explicit, "photos", quiet)

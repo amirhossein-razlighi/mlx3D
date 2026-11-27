@@ -161,9 +161,12 @@ def _auto_pose_method() -> tuple[str, str]:
     """
     if importlib.util.find_spec("huggingface_hub") is not None:
         return "da3", "Depth Anything 3"
-    if has_colmap():
-        return "colmap", 'COLMAP found; pip install "mlx3d[models]" for Depth Anything 3'
-    return "builtin", 'built-in SfM; pip install "mlx3d[models]" for Depth Anything 3'
+    method, reason = _classical_pose_method()
+    return method, f'{reason}; pip install "mlx3d[models]" for Depth Anything 3'
+
+
+def _classical_pose_method() -> tuple[str, str]:
+    return ("colmap", "COLMAP found") if has_colmap() else ("builtin", "built-in SfM")
 
 
 def _masks_dir(cfg: CaptureConfig) -> str | None:
@@ -189,25 +192,70 @@ def _sfm_mask_paths(cfg: CaptureConfig, images: list[str]) -> list[str | None] |
     return [find_mask_file(masks_dir, os.path.basename(p)) for p in images]
 
 
+_POSES_RECORD = "poses.json"
+"""Records which engine produced ``<out>/sparse/0``, so resumed captures keep
+treating estimated poses as estimated (e.g. for joint pose refinement)."""
+
+
+def _pose_source(info: dict) -> str | None:
+    """The engine behind the training poses (``colmap``, ``builtin``, ``da3``...)."""
+    return info.get("source", info.get("method"))
+
+
 def _stage_poses(images_dir: str, out: str, cfg: CaptureConfig, source: str, log) -> dict:
     sparse = os.path.join(out, "sparse", "0")
     complete = all(
         os.path.exists(os.path.join(sparse, f))
         for f in ("cameras.bin", "images.bin", "points3D.bin")
     )
-    if cfg.poses == "existing":
+    reuse = cfg.poses == "existing" or (complete and not cfg.overwrite)
+    if reuse:
         if not complete:
             raise RuntimeError(f"--poses existing, but no sparse model at {sparse}.")
-        log(f"Using existing poses at {sparse}")
-        return {"method": "existing"}
-    if complete and not cfg.overwrite:
-        log(f"Reusing poses at {sparse} (pass --overwrite to recompute)")
-        return {"method": "existing"}
+        log(
+            f"Reusing poses at {sparse}"
+            + ("" if cfg.poses == "existing" else " (pass --overwrite to recompute)")
+        )
+        record = os.path.join(out, _POSES_RECORD)
+        info = {"method": "existing"}
+        if os.path.isfile(record):
+            with open(record) as f:
+                info["source"] = json.load(f).get("method")
+        return info
 
+    info = _estimate_poses(images_dir, out, cfg, source, log)
+    with open(os.path.join(out, _POSES_RECORD), "w") as f:
+        json.dump(info, f, indent=2)
+    return info
+
+
+def _da3_poses(images_dir: str, out: str, cfg: CaptureConfig, log) -> dict:
+    from .feedforward import FeedForwardConfig, run_feedforward_poses
+
+    result = run_feedforward_poses(
+        list_images(images_dir), out, FeedForwardConfig(model=cfg.pose_model), log=log
+    )
+    return {
+        "method": "da3",
+        "model": cfg.pose_model,
+        "registered": result.num_views,
+        "points": result.num_points,
+    }
+
+
+def _estimate_poses(images_dir: str, out: str, cfg: CaptureConfig, source: str, log) -> dict:
     method = cfg.poses
     if method == "auto":
         method, reason = _auto_pose_method()
         log(f"Pose method: {method} ({reason})")
+    if method == "da3":
+        try:
+            return _da3_poses(images_dir, out, cfg, log)
+        except OSError as e:  # e.g. offline before the one-time weight download
+            if cfg.poses != "auto":
+                raise
+            method, reason = _classical_pose_method()
+            log(f"Depth Anything 3 unavailable ({e}); falling back to {method} ({reason})")
     if method == "colmap":
         if not has_colmap():
             raise RuntimeError(
@@ -228,18 +276,6 @@ def _stage_poses(images_dir: str, out: str, cfg: CaptureConfig, source: str, log
             "registered": len(result.registered),
             "points": result.num_points,
             "mean_reproj_px": result.mean_reproj_px,
-        }
-    if method == "da3":
-        from .feedforward import FeedForwardConfig, run_feedforward_poses
-
-        result = run_feedforward_poses(
-            list_images(images_dir), out, FeedForwardConfig(model=cfg.pose_model), log=log
-        )
-        return {
-            "method": "da3",
-            "model": cfg.pose_model,
-            "registered": result.num_views,
-            "points": result.num_points,
         }
     raise ValueError(f"Unknown pose method {cfg.poses!r}.")
 
@@ -312,7 +348,7 @@ def _stage_train(out: str, images_dir: str, cfg: CaptureConfig, pose_info: dict,
         )
 
     refine = cfg.refine_poses == "on" or (
-        cfg.refine_poses == "auto" and pose_info.get("method") in _ESTIMATED_POSE_METHODS
+        cfg.refine_poses == "auto" and _pose_source(pose_info) in _ESTIMATED_POSE_METHODS
     )
     log(f"Pose refinement during training: {'on' if refine else 'off'}")
 
