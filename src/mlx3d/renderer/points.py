@@ -64,8 +64,12 @@ def render_points(
     w = mx.exp(-(dx * dx + dy * dy) / (2.0 * radius * radius))  # (P, K)
 
     # Depth-aware weighting: nearer points dominate (soft z-buffer).
+    # Normalize against the nearest *visible* point: points behind the camera
+    # would otherwise clamp to znear, dominate the max and underflow every
+    # visible weight to zero (a blank image).
     inv_depth = 1.0 / mx.maximum(z, camera.znear)
-    depth_w = mx.exp(depth_temperature * (inv_depth - inv_depth.max()))
+    nearest = mx.stop_gradient(mx.max(mx.where(in_front, inv_depth, 0.0)))
+    depth_w = mx.exp(depth_temperature * mx.minimum(inv_depth - nearest, 0.0))
     w = w * depth_w[:, None] * in_front[:, None]
 
     # Mask out-of-bounds pixels and flatten indices.
