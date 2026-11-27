@@ -1,9 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
 ### Added
 
+- **Spaghetti Splatting** (`mlx3d.splatting.spaghetti`): radiance fields of
+  Gaussian-blurred line segments (Shramko et al., 2026), a strict superset of
+  3DGS that represents hair, wires, spokes and grass with far fewer
+  primitives. Custom Metal forward/backward rasterizer that evaluates the
+  paper's closed-form segment optical depth exactly per pixel (in the
+  kernel's whitened space, robust for thin kernels), with opacity-aware
+  footprint ellipses for binning and early rejection, and SIMD-group-reduced
+  gradient atomics (10x faster backward). `SpaghettiModel` (PLY IO, 3DGS
+  lift, polyline extraction), `SpaghettiTrainer` (3DGS-MCMC-style relocation
+  and growth with exact split / clone moves, endpoint attraction and
+  merging into polylines), and `examples/train_spaghetti_splatting.py` for
+  COLMAP scenes with a like-for-like 3DGS comparison. Validated against
+  numerical quadrature (4e-5), a dense MLX reference (1e-6) and autodiff
+  gradients (1e-5).
 - Foreground masks for Gaussian training (#28): `load_colmap(masks_dir=...,
   masks_from_alpha=...)` loads COLMAP-layout masks (`<name>.png` or
   `<stem>.png`; grayscale / RGB / RGBA) or the images' own alpha into a

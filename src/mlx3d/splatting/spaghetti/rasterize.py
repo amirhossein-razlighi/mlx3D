@@ -414,8 +414,9 @@ def rasterize_segments(
     Args:
         segments: (N, 16) packed segments (:func:`pack_segments`).
         colors: (N, 3) RGB.
-        means2d, conics: (N, 2) / (N, 3) pixel-space footprint ellipses
-            (``x^T C x <= 1`` around ``means2d``); pixels outside are skipped.
+        means2d: (N, 2) footprint-ellipse centers in pixels.
+        conics: (N, 3) footprint ellipses ``x^T C x <= 1`` around ``means2d``;
+            pixels outside are skipped.
         intrinsics: pinhole ``(fx, fy, cx, cy)`` for per-pixel ray directions.
 
     Returns:

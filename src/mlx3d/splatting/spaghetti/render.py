@@ -36,9 +36,14 @@ def render_spaghetti(
     ``camera``'s extrinsics, the pose (e.g. via :func:`~mlx3d.cameras.refine_camera`).
 
     Args:
-        means, halves: (N, 3) midpoints and half-vectors; segment = ``m ± h``.
-        quats, scales: (N, 4) / (N, 3) kernel rotation and standard deviations.
-        rho: (N,) densities. colors: (N, 3) RGB.
+        camera: the pinhole camera to render from.
+        means: (N, 3) segment midpoints.
+        halves: (N, 3) half-vectors; each segment spans ``m - h`` to ``m + h``.
+        quats: (N, 4) kernel rotations (w, x, y, z).
+        scales: (N, 3) kernel standard deviations.
+        rho: (N,) densities.
+        colors: (N, 3) RGB.
+        background: optional (3,) background color (default black).
 
     Returns:
         dict with ``image`` (H, W, 3), ``alpha`` (H, W) and the projection

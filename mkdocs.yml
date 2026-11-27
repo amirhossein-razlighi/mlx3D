@@ -75,6 +75,7 @@ nav:
       - Hash-Grid NeRF Encodings: tutorials/hashgrid_nerf.md
       - Gaussian Splatting: tutorials/gaussian_splatting.md
       - Fast Splat Viewing: tutorials/fast_rendering.md
+      - Spaghetti Splatting: tutorials/spaghetti_splatting.md
       - Extending MLX3D: tutorials/extending.md
   - API Reference:
       - Structures: api/structures.md
@@ -86,6 +87,7 @@ nav:
       - Renderer: api/renderer.md
       - Neural Networks: api/nn.md
       - Gaussian Splatting: api/splatting.md
+      - Spaghetti Splatting: api/spaghetti.md
       - Datasets: api/datasets.md
       - Capture: api/capture.md
       - Models: api/models.md

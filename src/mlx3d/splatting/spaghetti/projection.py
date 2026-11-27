@@ -50,7 +50,8 @@ def segment_optical_depth(e: mx.array, a: mx.array, v: mx.array, rho: mx.array) 
 
     Args:
         e: ``(..., 3)`` whitened ray directions ``W d``.
-        a, v: ``(..., 3)`` whitened segment start and direction.
+        a: ``(..., 3)`` whitened segment start.
+        v: ``(..., 3)`` whitened segment direction (end minus start).
         rho: ``(...)`` densities.
     """
     n = mx.sum(e * e, axis=-1, keepdims=True)
