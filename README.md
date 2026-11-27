@@ -40,7 +40,7 @@ MLX3D brings the PyTorch3D workflow to Macs: batched 3D data structures, cameras
 pip install mlx3d
 ```
 
-Requires an Apple Silicon Mac and Python ≥ 3.10.
+Requires an Apple Silicon Mac and Python ≥ 3.11.
 
 ## Photos → splat in minutes
 
