@@ -347,6 +347,26 @@ def test_da3_pose_stage_writes_colmap_model(tmp_path, monkeypatch):
     assert (cam.width, cam.height) == (w, h)
     assert cam.fx == pytest.approx(20.0 * w / 14) and cam.fy == pytest.approx(20.0 * h / 14)
 
+    # Depth priors are saved per frame and load at any training resolution.
+    from mlx3d.capture.feedforward import DEPTH_DIR, load_depth_prior
+
+    prior_path = tmp_path / DEPTH_DIR / "0.png.npy"
+    assert prior_path.exists()
+    prior = np.array(load_depth_prior(str(prior_path), (w, h)))
+    assert prior.shape == (h, w)
+    np.testing.assert_allclose(prior[prior > 0], 2.0, rtol=1e-3)
+
+
+def test_load_depth_prior_keeps_unknown_pixels_unknown(tmp_path):
+    from mlx3d.capture.feedforward import load_depth_prior
+
+    depth = np.full((8, 8), 3.0, np.float16)
+    depth[:, :4] = 0.0
+    np.save(tmp_path / "d.npy", depth)
+    prior = np.array(load_depth_prior(str(tmp_path / "d.npy"), (16, 16)))
+    assert (prior[:, :7] == 0).all()  # unknown, including the blended border
+    np.testing.assert_allclose(prior[:, 9:], 3.0, rtol=1e-3)
+
 
 def test_run_capture_end_to_end_builtin_poses(tmp_path):
     """Photos -> built-in SfM -> short 3DGS training -> compacted splat.ply."""
@@ -370,6 +390,9 @@ def test_run_capture_end_to_end_builtin_poses(tmp_path):
     # Re-running resumes: the pose stage is reused, not recomputed.
     summary2 = run_capture(img_dir, out, cfg, log=lambda *_: None)
     assert summary2["stages"]["poses"]["method"] == "existing"
+    # ...but remembers its source, so the estimated poses are still refined.
+    assert summary2["stages"]["poses"]["source"] == "builtin"
+    assert summary2["stages"]["train"]["pose_refined"] is True
 
 
 def test_auto_pose_method_prefers_da3(monkeypatch):
@@ -392,3 +415,79 @@ def test_auto_pose_method_prefers_da3(monkeypatch):
     ]:
         monkeypatch.setattr(pipeline, "has_colmap", lambda value=has_colmap: value)
         assert pipeline._auto_pose_method()[0] == expected
+
+
+def test_sfm_mask_paths_are_opt_in(tmp_path):
+    from mlx3d.capture.pipeline import CaptureConfig, _sfm_mask_paths
+
+    (tmp_path / "masks").mkdir()
+    Image.fromarray(np.full((4, 4), 255, np.uint8)).save(tmp_path / "masks" / "a.jpg.png")
+    images = [str(tmp_path / "a.jpg"), str(tmp_path / "b.jpg")]
+    assert _sfm_mask_paths(CaptureConfig(masks=str(tmp_path / "masks")), images) is None
+    paths = _sfm_mask_paths(CaptureConfig(masks=str(tmp_path / "masks"), mask_sfm=True), images)
+    assert paths[0].endswith("a.jpg.png") and paths[1] is None
+
+
+def test_run_capture_with_masks_appearance_and_priors(tmp_path):
+    """Masked, transparent and appearance-compensated training on posed photos."""
+    pytest.importorskip("cv2")
+    pytest.importorskip("scipy")
+    from mlx3d.capture import CaptureConfig, run_capture
+    from mlx3d.capture.feedforward import DEPTH_DIR
+
+    img_dir = tmp_path / "photos"
+    _render_corner_scene(str(img_dir), views=8, size=192, seed=2)
+    masks = tmp_path / "masks"
+    masks.mkdir()
+    for path in sorted(img_dir.iterdir()):
+        mask = np.zeros((192, 192), np.uint8)
+        mask[24:168, 24:168] = 255
+        Image.fromarray(mask).save(masks / f"{path.name}.png")
+
+    out = str(tmp_path / "cap")
+    common = dict(quality="fast", viewer=False, iters=60, save_every=0, masks=str(masks))
+    run_capture(str(img_dir), out, CaptureConfig(poses="builtin", **common), log=lambda *_: None)
+
+    # Fake DA3 depth maps (constant depth) so the prior losses have inputs.
+    os.makedirs(os.path.join(out, DEPTH_DIR))
+    for path in img_dir.iterdir():
+        np.save(
+            os.path.join(out, DEPTH_DIR, f"{path.name}.npy"), np.full((64, 64), 2.0, np.float16)
+        )
+
+    for extra in (
+        dict(alpha_mode="masked", appearance=True, depth_prior=True),
+        dict(alpha_mode="transparent"),
+    ):
+        cfg = CaptureConfig(poses="existing", **common, **extra)
+        summary = run_capture(str(img_dir), out, cfg, log=lambda *_: None)
+        assert np.isfinite(summary["stages"]["train"]["psnr_mean"])
+        assert os.path.exists(os.path.join(out, "splat.ply"))
+
+
+def test_auto_poses_fall_back_when_da3_is_unavailable(tmp_path, monkeypatch):
+    """Offline before the first weight download: auto mode falls back to SfM,
+    an explicit --poses da3 still fails loudly."""
+    import mlx3d.capture.pipeline as pipeline
+    import mlx3d.capture.sfm as sfm
+
+    def offline(*args, **kwargs):
+        raise OSError("no network")
+
+    class Result:
+        registered, num_points, mean_reproj_px = ["a"], 1, 0.5
+
+    sfm_calls = []
+    monkeypatch.setattr(pipeline, "_auto_pose_method", lambda: ("da3", "test"))
+    monkeypatch.setattr(pipeline, "_da3_poses", offline)
+    monkeypatch.setattr(pipeline, "has_colmap", lambda: False)
+    monkeypatch.setattr(sfm, "run_sfm", lambda *a, **k: sfm_calls.append(a) or Result())
+    (tmp_path / "images").mkdir()
+    images, quiet = str(tmp_path / "images"), lambda *a: None
+
+    auto = pipeline.CaptureConfig(poses="auto")
+    info = pipeline._estimate_poses(images, str(tmp_path), auto, "photos", quiet)
+    assert info["method"] == "builtin" and len(sfm_calls) == 1
+    explicit = pipeline.CaptureConfig(poses="da3")
+    with pytest.raises(OSError, match="no network"):
+        pipeline._estimate_poses(images, str(tmp_path), explicit, "photos", quiet)

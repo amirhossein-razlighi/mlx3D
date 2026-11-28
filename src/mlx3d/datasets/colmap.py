@@ -13,6 +13,7 @@ import numpy as np
 
 from ..cameras import Camera
 from .images import ImageCollection
+from .masks import MaskCollection, find_mask_file
 
 __all__ = ["ColmapDataset", "load_colmap", "save_colmap"]
 
@@ -24,6 +25,8 @@ class ColmapDataset:
     image_names: list[str]
     points: mx.array  # (P, 3) SfM points
     point_colors: mx.array  # (P, 3) in [0, 1]
+    masks: MaskCollection | None = None
+    """Optional ``(H, W)`` foreground masks aligned with ``images``."""
 
     def __len__(self) -> int:
         return len(self.cameras)
@@ -233,6 +236,8 @@ def load_colmap(
     downscale: int = 1,
     load_images: bool = True,
     cache: str = "ram",
+    masks_dir: str | None = None,
+    masks_from_alpha: bool = False,
 ) -> ColmapDataset:
     """Load a COLMAP scene laid out as ``root/sparse/0`` + ``root/<images_dir>``.
 
@@ -244,7 +249,14 @@ def load_colmap(
             ``"uint8"`` (4x less memory, negligible per-access cost), or
             ``"disk"`` (paths only, decode on access; near-zero resident
             memory). See :class:`~mlx3d.datasets.images.ImageCollection`.
+        masks_dir: optional foreground-mask directory (relative to ``root``
+            unless absolute) in COLMAP's layout: ``<masks_dir>/<name>.png``
+            or ``<masks_dir>/<stem>.png`` for image ``<name>``. Every image
+            needs a non-empty mask of the same size.
+        masks_from_alpha: use the source images' alpha channel as masks.
     """
+    if masks_dir is not None and masks_from_alpha:
+        raise ValueError("Pass either masks_dir or masks_from_alpha, not both.")
     sparse = os.path.join(root, "sparse", "0")
     if not os.path.isdir(sparse):
         sparse = os.path.join(root, "sparse")
@@ -255,6 +267,15 @@ def load_colmap(
     cameras: list[Camera] = []
     images = ImageCollection(cache=cache, downscale=downscale, white_background=None)
     names: list[str] = []
+    use_masks = load_images and (masks_dir is not None or masks_from_alpha)
+    masks = (
+        MaskCollection(cache, downscale, from_image_alpha=masks_from_alpha) if use_masks else None
+    )
+    if masks_dir is not None:
+        masks_dir = masks_dir if os.path.isabs(masks_dir) else os.path.join(root, masks_dir)
+        if use_masks and not os.path.isdir(masks_dir):
+            raise FileNotFoundError(f"Masks directory {masks_dir} does not exist.")
+    missing: list[str] = []
     for _, meta in sorted(imgs_meta.items(), key=lambda kv: kv[1]["name"]):
         cam = cams_meta[meta["camera_id"]]
         params = cam["params"]
@@ -313,12 +334,25 @@ def load_colmap(
         )
         if load_images:
             images.append_file(image_path)
+        if masks is not None:
+            mask_path = image_path if masks_from_alpha else find_mask_file(masks_dir, meta["name"])
+            if mask_path is None:
+                missing.append(meta["name"])
+            else:
+                masks.append_file(mask_path, expected_hw=(int(H), int(W)))
         names.append(meta["name"])
 
+    if missing:
+        shown = ", ".join(missing[:5]) + (" ..." if len(missing) > 5 else "")
+        raise FileNotFoundError(
+            f"{len(missing)} of {len(names)} images have no mask in {masks_dir} "
+            f"(looked for <name>.png and <stem>.png): {shown}"
+        )
     return ColmapDataset(
         cameras=cameras,
         images=images,
         image_names=names,
         points=mx.array(xyz.astype(np.float32)),
         point_colors=mx.array(rgb.astype(np.float32) / 255.0),
+        masks=masks,
     )

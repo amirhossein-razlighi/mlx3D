@@ -325,3 +325,15 @@ def test_render_points_depth_ordering():
     out = render_points(cam, pts, colors, radius=1.0, depth_temperature=50.0)
     center = out["image"][16, 16]
     assert float(center[0]) > float(center[1])  # red wins
+
+
+def test_render_points_ignores_points_behind_the_camera():
+    """A point behind the camera must not blank out the visible ones."""
+    cam = Camera.look_at(eye=(0, 0, -3.0), at=(0, 0, 0), width=32, height=32)
+    visible = mx.array([[0.0, 0.0, 0.0], [0.2, 0.1, 0.5]])
+    behind = mx.array([[0.0, 0.0, -5.0]])  # behind the eye
+    colors = mx.ones((3, 3))
+    alone = render_points(cam, visible, colors[:2], depth_temperature=50.0)
+    mixed = render_points(cam, mx.concatenate([visible, behind]), colors, depth_temperature=50.0)
+    assert float(mixed["alpha"].max()) > 0.5
+    np.testing.assert_allclose(np.array(mixed["image"]), np.array(alone["image"]), atol=1e-5)

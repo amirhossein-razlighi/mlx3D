@@ -2,14 +2,91 @@
 
 ## Unreleased
 
+### Added
+
+- Foreground masks for Gaussian training (#28): `load_colmap(masks_dir=...,
+  masks_from_alpha=...)` loads COLMAP-layout masks (`<name>.png` or
+  `<stem>.png`; grayscale / RGB / RGBA) or the images' own alpha into a
+  `MaskCollection` aligned with every cache mode and downscale, failing early
+  on missing, empty or mis-sized masks. `GaussianTrainer.step(..., mask=)`
+  supports `alpha_mode="masked"` (coverage-normalized L1 + mask-aware SSIM;
+  background pixels get no loss or gradient; 2DGS geometry losses restricted
+  to the mask) and `"transparent"` (mask = target opacity: alpha supervision,
+  target composited over an optionally random background).
+- Mask-aware metrics `masked_l1`, `masked_psnr`, `masked_ssim` and a per-pixel
+  `ssim_map`; `mlx3d-eval --masks / --masks-from-alpha / --alpha-mode` reports
+  the matching metrics plus coverage, alpha MAE and foreground IoU.
+- Per-view appearance compensation (`TrainerConfig.appearance`): a learnable
+  affine color transform per image absorbs exposure / white-balance changes.
+- Geometry priors: `TrainerConfig.lambda_depth_prior` (scale/shift-invariant
+  Pearson depth correlation) and `lambda_normal_prior` (normals of rendered vs
+  prior depth) with `step(..., depth_prior=)`.
+- `mlx3d-capture --masks / --masks-from-alpha / --alpha-mode / --mask-sfm /
+  --appearance / --depth-prior`. The DA3 pose stage now saves per-frame depth
+  maps (`<out>/depth/`) for the priors; `--mask-sfm` opts into masked feature
+  extraction for COLMAP and the built-in SfM.
+- "Training on Real Captures" tutorial.
+- `mlx3d.models.DepthAnything3`: an MLX port of the Depth Anything 3
+  feed-forward geometry model. From any number of views of a static scene,
+  one forward pass predicts per-view depth, confidence, intrinsics and
+  world-to-camera poses (`GeometryPrediction`, with `cameras()`,
+  `world_points()`, `point_cloud()` and `to_pointclouds()` helpers). Loads the
+  official checkpoints (`da3-small` / `da3-base`, Apache-2.0; `da3-large`,
+  CC BY-NC) through an exhaustive, strict weight conversion; backbone in
+  float32 or half precision, and matches the official PyTorch implementation
+  to ~1e-6 relative error on every output. Sequences longer than
+  `max_views` run in anchored chunks aligned by a similarity fit on shared anchor cameras.
+  Weight downloads need the new optional `[models]` extra (`huggingface_hub`).
+- `mlx3d-capture --poses da3 [--pose-model da3-small]`: feed-forward camera
+  poses and a dense fused point cloud as the capture pipeline's pose stage
+  (`mlx3d.capture.run_feedforward_poses`), with joint pose refinement on by
+  default.
+- `examples/predict_geometry.py`: photos → depth maps, fused `points.ply`,
+  and a fly-through video; plus the "Photos → Depth & Cameras" tutorial.
+
 ### Changed
 
+- Python 3.11 or newer is required (3.10 reached end of life in October 2026,
+  and the patched Pillow and filelock releases need 3.11). CI now tests 3.11,
+  3.12 and 3.13.
 - `mlx3d-capture --poses auto` now prefers Depth Anything 3 when the
   `[models]` extra is installed, then COLMAP, then the built-in SfM.
 - `mlx3d-capture` initializes splat scales from nearest-neighbor spacing
   against up to 100k reference points (was 10k). On dense clouds the old
   subsample inflated every initial splat several-fold, making early training
   steps up to ~10x slower.
+
+### Fixed
+
+- Normal-based losses (the 2DGS normal-consistency loss and the new normal
+  prior) produced NaN gradients wherever a pixel's depth tangents vanish
+  (empty background): `linalg.norm` has a NaN gradient at zero, which a zero
+  mask weight does not cancel. Normalization is now zero-safe.
+- `render_points` rendered blank images when any point was behind the camera:
+  its soft z-weights were normalized against the nearest point including
+  culled ones, which underflowed every visible weight.
+- Resumed captures forgot where their poses came from (reported only as
+  "existing"), so built-in SfM / DA3 poses lost joint pose refinement on a
+  re-run. The pose source is now recorded in `<out>/poses.json`.
+- `--poses auto` falls back to COLMAP / the built-in SfM when Depth Anything 3
+  cannot load (e.g. offline before the one-time weight download) instead of
+  failing the capture.
+- Broken images on the Interactive Viewer docs page (raw HTML paths were not
+  relative to the page's served URL); a new test checks every raw-HTML media
+  path in the docs.
+- CI: macOS jobs moved to `macos-15` (GitHub retired the `macos-14` image, so
+  every macOS test and docs-deploy job was being cancelled), and all actions
+  moved to their Node 24 majors.
+
+### Security
+
+- Lockfile upgrades for the open Dependabot alerts: Pillow 13.0.0, filelock
+  4.3.1, pymdown-extensions >= 12.3, mkdocs-material 9.8.2.
+
+## 0.3.2
+
+### Changed
+
 - Faster Gaussian tile binning (`bin_gaussians`), on the critical path of every
   render and training step. The default path now fuses expansion and
   range-finding into two Metal kernels — tile duplicates are emitted in depth
@@ -21,23 +98,6 @@
 
 ### Added
 
-- `mlx3d.models.DepthAnything3`: an MLX port of the Depth Anything 3
-  feed-forward geometry model. From any number of views of a static scene,
-  one forward pass predicts per-view depth, confidence, intrinsics and
-  world-to-camera poses (`GeometryPrediction`, with `cameras()`,
-  `world_points()`, `point_cloud()` and `to_pointclouds()` helpers). Loads the
-  official checkpoints (`da3-small` / `da3-base`, Apache-2.0; `da3-large`,
-  CC BY-NC) through an exhaustive, strict weight conversion; backbone in
-  float32 or half precision, and matches the official PyTorch implementation
-  to ~1e-6 relative error on every output. Sequences longer than `max_views` run in
-  anchored chunks aligned by a similarity fit on shared anchor cameras.
-  Weight downloads need the new optional `[models]` extra (`huggingface_hub`).
-- `mlx3d-capture --poses da3 [--pose-model da3-small]`: feed-forward camera
-  poses and a dense fused point cloud as the capture pipeline's pose stage
-  (`mlx3d.capture.run_feedforward_poses`), with joint pose refinement on by
-  default.
-- `examples/predict_geometry.py`: photos → depth maps, fused `points.ply`,
-  and a fly-through video; plus the "Photos → Depth & Cameras" tutorial.
 - Type support: mlx3d now ships a `py.typed` marker, so downstream projects
   get its inline type hints under mypy / pyright.
 - Finite-difference gradient check for the Metal Gaussian rasterizer's
@@ -45,6 +105,14 @@
   `unit` test). Confirms the analytic gradients match numerical derivatives
   (geometry to ~1e-2, appearance to ~1e-3), a runnable correctness artifact on
   Apple Silicon.
+
+### Security
+
+- Pillow, certifi and urllib3 bumped for Dependabot alerts (#29).
+
+## 0.3.0
+
+### Added
 
 - Fast forward-only Gaussian rasterization (`FastGaussianRenderer`,
   `render_gaussians_fast`), adapting the geometry-shader-style pipeline of
@@ -84,6 +152,11 @@
 - `save_colmap`: binary COLMAP sparse-model writer (inverse of `load_colmap`),
   with intrinsics deduplication and PINHOLE/OPENCV/OPENCV_FISHEYE support.
 
+### Packaging
+
+- Tag-driven releases: the version comes from the git tag (hatch-vcs) and
+  pushing a `v*` tag builds and publishes to PyPI (#25).
+
 ## 0.2.1
 
 ### Added
@@ -117,8 +190,6 @@
   including the uv-venv `pip` caveat, in the README.
 
 ## 0.2.0
-
-Release branch in progress.
 
 ### Added
 
