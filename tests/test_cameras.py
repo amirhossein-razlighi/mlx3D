@@ -6,8 +6,10 @@ import numpy as np
 from mlx3d.cameras import Camera, CameraBatch, look_at, look_at_view_transform
 
 
-def assert_close(a, b, atol=1e-5):
-    np.testing.assert_allclose(np.array(a), np.array(b), atol=atol)
+def assert_close(a, b, atol=1e-5, rtol=1e-6):
+    # rtol: float32 has ~7 significant digits, so pixel coordinates in the
+    # hundreds legitimately differ by ~1e-4 between equivalent code paths.
+    np.testing.assert_allclose(np.array(a), np.array(b), atol=atol, rtol=rtol)
 
 
 def _ring_cameras(n=5, w=64, h=48):
