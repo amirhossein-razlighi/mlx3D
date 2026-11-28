@@ -4,7 +4,16 @@ from __future__ import annotations
 
 import mlx.core as mx
 
-__all__ = ["psnr", "ssim", "ms_ssim", "l1_loss"]
+__all__ = [
+    "l1_loss",
+    "masked_l1",
+    "masked_psnr",
+    "masked_ssim",
+    "ms_ssim",
+    "psnr",
+    "ssim",
+    "ssim_map",
+]
 
 # Standard 5-scale MS-SSIM weights (Wang et al., 2003).
 _MSSSIM_WEIGHTS = (0.0448, 0.2856, 0.3001, 0.2363, 0.1333)
@@ -27,7 +36,7 @@ def _gaussian_window(size: int, sigma: float) -> mx.array:
 
 
 def _ssim_maps(pred, target, max_val, window_size, sigma):
-    """Return mean SSIM and mean contrast-structure (cs) for a single scale."""
+    """Per-pixel SSIM and contrast-structure (cs) maps for a single scale."""
     C = pred.shape[-1]
     g = _gaussian_window(window_size, sigma)
     win = (g[:, None] * g[None, :]).reshape(window_size, window_size, 1)
@@ -52,7 +61,7 @@ def _ssim_maps(pred, target, max_val, window_size, sigma):
     c2 = (0.03 * max_val) ** 2
     cs_map = (2.0 * sigma_pt + c2) / (sigma_p + sigma_t + c2)
     ssim_map = (2.0 * mu_pt + c1) / (mu_pp + mu_tt + c1) * cs_map
-    return ssim_map.mean(), cs_map.mean()
+    return ssim_map, cs_map
 
 
 def _avgpool2(x: mx.array) -> mx.array:
@@ -80,9 +89,69 @@ def ssim(
         Scalar mean SSIM. Use ``1 - ssim(...)`` as a loss (the Gaussian
         filtering is fully differentiable).
     """
-    if pred.ndim == 3:
+    return ssim_map(pred, target, max_val, window_size, sigma).mean()
+
+
+def ssim_map(
+    pred: mx.array,
+    target: mx.array,
+    max_val: float = 1.0,
+    window_size: int = 11,
+    sigma: float = 1.5,
+) -> mx.array:
+    """Per-pixel, per-channel SSIM map with the same shape as ``pred``."""
+    batched = pred.ndim == 4
+    if not batched:
         pred, target = pred[None], target[None]
-    return _ssim_maps(pred, target, max_val, window_size, sigma)[0]
+    out = _ssim_maps(pred, target, max_val, window_size, sigma)[0]
+    return out if batched else out[0]
+
+
+def _as_weights(mask: mx.array, like: mx.array) -> mx.array:
+    """Broadcast an ``(H, W)`` / ``(H, W, 1)`` mask against an ``(H, W, C)`` image."""
+    if mask.ndim == like.ndim - 1:
+        mask = mask[..., None]
+    return mask.astype(like.dtype)
+
+
+def masked_l1(pred: mx.array, target: mx.array, mask: mx.array) -> mx.array:
+    """Mean absolute error weighted by ``mask`` and normalized by its total
+    weight, so the value does not depend on how much of the frame it covers."""
+    w = _as_weights(mask, pred)
+    return (mx.abs(pred - target) * w).sum() / mx.maximum(w.sum() * pred.shape[-1], 1e-8)
+
+
+def masked_psnr(pred: mx.array, target: mx.array, mask: mx.array, max_val: float = 1.0) -> mx.array:
+    """PSNR over the (soft) masked region, coverage-normalized."""
+    w = _as_weights(mask, pred)
+    mse = (((pred - target) ** 2) * w).sum() / mx.maximum(w.sum() * pred.shape[-1], 1e-8)
+    return 10.0 * mx.log10((max_val * max_val) / mx.maximum(mse, 1e-12))
+
+
+def masked_ssim(
+    pred: mx.array,
+    target: mx.array,
+    mask: mx.array,
+    max_val: float = 1.0,
+    window_size: int = 11,
+    sigma: float = 1.5,
+) -> mx.array:
+    """Mean SSIM over the (soft) masked region.
+
+    Boundary policy: before filtering, every fully ignored pixel (``mask ==
+    0``) of *both* images is replaced by the same constant, the target's
+    masked mean. Windows straddling the silhouette then see identical
+    content outside the mask, ignored pixels carry no gradient, and the
+    per-pixel map is averaged with ``mask`` as weights.
+    """
+    w = _as_weights(mask, pred)
+    keep = (w > 0).astype(pred.dtype)
+    fill = mx.stop_gradient((target * w).sum() / mx.maximum(w.sum() * pred.shape[-1], 1e-8))
+    pred_f = pred * keep + fill * (1.0 - keep)
+    target_f = target * keep + fill * (1.0 - keep)
+    m = ssim_map(pred_f, target_f, max_val, window_size, sigma)
+    w = mx.broadcast_to(w, m.shape)
+    return (m * w).sum() / mx.maximum(w.sum(), 1e-8)
 
 
 def ms_ssim(
@@ -123,7 +192,8 @@ def ms_ssim(
     cs_factors = []
     last_ssim = None
     for i, _ in enumerate(weights):
-        ssim_mean, cs_mean = _ssim_maps(pred, target, max_val, window_size, sigma)
+        ssim_full, cs_full = _ssim_maps(pred, target, max_val, window_size, sigma)
+        ssim_mean, cs_mean = ssim_full.mean(), cs_full.mean()
         if i < n_scales - 1:
             cs_factors.append(mx.maximum(cs_mean, 0.0))
             pred, target = _avgpool2(pred), _avgpool2(target)

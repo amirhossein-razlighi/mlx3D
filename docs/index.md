@@ -21,18 +21,27 @@ MLX3D brings the PyTorch3D workflow to Macs: batched 3D data structures, cameras
 - **Mesh rendering** — differentiable soft triangle rasterization, OBJ/MTL texture loading and UV sampling, plus scalar-field mesh extraction.
 - **3D Gaussian Splatting** — a Metal translation of the reference CUDA rasterizer: tile-based forward and backward kernels wrapped in `mx.custom_function`, EWA and 3DGUT-style UT projection, spherical harmonics, anti-aliased and arbitrary feature rendering, adaptive density control, COLMAP loading, and standard `.ply` checkpoints viewable in any splat viewer.
 - **Feed-forward geometry** — [Depth Anything 3](tutorials/feedforward_geometry.md): photos → per-view depth, intrinsics and poses in one forward pass, with official pretrained weights.
+- **Real-world training** — [foreground masks](tutorials/real_captures.md) (masked or transparent cut-out), per-image exposure compensation, and depth / normal priors.
+- **Spaghetti Splatting** — [curve-segment primitives](tutorials/spaghetti_splatting.md) for thin structures, a strict superset of 3DGS.
 - **Interactive viewer** — [`mlx3d-view`](viewer.md) opens any 3DGS checkpoint in the browser with orbit/pan/zoom, rendered live by the Metal kernels; NeRFs are supported too.
 - **IO** — OBJ and PLY (ascii/binary) loading and saving, including 3DGS checkpoint layouts.
 
-## What is new in 0.2.0
+## What's new
 
-<p align="center"><img src="assets/v020_truck_render_hi.png" width="88%" /></p>
+<p align="center"><img src="assets/da3_garden_depth.jpg" width="88%" alt="Garden photos and their Depth Anything 3 depth maps" /></p>
 
-The 0.2.0 release focuses on production use: `mlx3d-render`, `mlx3d-eval`,
-and `mlx3d-compact` CLIs; textured glTF import/export; PBR-style mesh shading;
-2DGS geometry regularizers and surfel extraction helpers; Mip-Splatting-style
-anti-aliasing; arbitrary-channel Gaussian feature rendering; and a
-3DGUT-style Unscented Transform projection path for distorted/fisheye cameras.
+- **Photos → splat in one command** — [`mlx3d-capture`](tutorials/capture.md)
+  turns a photo folder or phone video into a trained splat, with poses from
+  [Depth Anything 3](tutorials/feedforward_geometry.md), COLMAP or a built-in SfM.
+- **Feed-forward geometry** — depth, intrinsics and poses for any number of
+  photos in one forward pass, matching the official implementation to ~1e-6.
+- **Real-world training** — [foreground masks, exposure compensation and depth
+  priors](tutorials/real_captures.md) for phone captures.
+- **Fast viewing** — a [forward-only rasterizer](tutorials/fast_rendering.md)
+  1.5–2× faster than the training path, including 4D sequence playback.
+
+See the [changelog](https://github.com/amirhossein-razlighi/mlx3D/blob/main/CHANGELOG.md)
+for everything in each release.
 
 ## Installation
 
@@ -40,7 +49,7 @@ anti-aliasing; arbitrary-channel Gaussian feature rendering; and a
 pip install mlx3d
 ```
 
-Requires an Apple Silicon Mac (M1 or newer) and Python ≥ 3.10.
+Requires an Apple Silicon Mac (M1 or newer) and Python ≥ 3.11.
 
 ## A 60-second taste
 

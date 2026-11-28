@@ -5,7 +5,7 @@ docs fixes and pull requests are all welcome.
 
 ## Getting set up
 
-You need an Apple Silicon Mac (MLX runs on the Metal GPU) and Python ≥ 3.10.
+You need an Apple Silicon Mac (MLX runs on the Metal GPU) and Python ≥ 3.11.
 Development uses [uv](https://docs.astral.sh/uv/):
 
 ```bash

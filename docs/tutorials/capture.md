@@ -64,7 +64,13 @@ mlx3d-capture ./my_photos/ --poses builtin       # force the built-in SfM
 mlx3d-capture ./my_photos/ --no-viewer           # headless (CI, ssh)
 mlx3d-capture ./my_photos/ --low-mem             # 8–16 GB machines
 mlx3d-capture ./my_photos/ --out captures/lion   # choose the output folder
+mlx3d-capture ./my_photos/ --masks masks/        # ignore the background
+mlx3d-capture ./my_photos/ --appearance          # varying exposure / white balance
+mlx3d-capture ./my_photos/ --depth-prior         # DA3 depth + normal priors
 ```
+
+Masks, exposure compensation and geometry priors are explained in
+[Training on Real Captures](real_captures.md).
 
 `--quality` presets pick iterations, training resolution, video frame count
 and SH degree (`fast` = 3k iters / 960 px, `balanced` = 7k / 1280 px,

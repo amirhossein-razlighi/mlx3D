@@ -66,6 +66,7 @@ nav:
   - Tutorials:
       - "Photos → Splat in Minutes": tutorials/capture.md
       - "Photos → Depth & Cameras": tutorials/feedforward_geometry.md
+      - Training on Real Captures: tutorials/real_captures.md
       - Mesh Optimization: tutorials/mesh_optimization.md
       - Mesh Rendering and Extraction: tutorials/mesh_rendering.md
       - Mesh Lighting and Shading: tutorials/mesh_lighting.md
@@ -74,6 +75,7 @@ nav:
       - Hash-Grid NeRF Encodings: tutorials/hashgrid_nerf.md
       - Gaussian Splatting: tutorials/gaussian_splatting.md
       - Fast Splat Viewing: tutorials/fast_rendering.md
+      - Spaghetti Splatting: tutorials/spaghetti_splatting.md
       - Extending MLX3D: tutorials/extending.md
   - API Reference:
       - Structures: api/structures.md
@@ -85,6 +87,7 @@ nav:
       - Renderer: api/renderer.md
       - Neural Networks: api/nn.md
       - Gaussian Splatting: api/splatting.md
+      - Spaghetti Splatting: api/spaghetti.md
       - Datasets: api/datasets.md
       - Capture: api/capture.md
       - Models: api/models.md

@@ -4,7 +4,8 @@ One network pass estimates every frame's intrinsics, pose and depth. Unlike
 feature-matching SfM it does not need texture or wide overlap to register a
 view, so it succeeds on sparse, low-texture or blurry captures where SfM drops
 frames — at the cost of slightly less precise poses, which the trainer's joint
-pose refinement then corrects.
+pose refinement then corrects. Its per-frame depth maps are kept as well, for
+optional depth / normal prior losses during training.
 """
 
 from __future__ import annotations
@@ -13,7 +14,18 @@ import os
 import time
 from dataclasses import dataclass
 
-__all__ = ["FeedForwardConfig", "FeedForwardResult", "run_feedforward_poses"]
+import numpy as np
+
+__all__ = [
+    "DEPTH_DIR",
+    "FeedForwardConfig",
+    "FeedForwardResult",
+    "load_depth_prior",
+    "run_feedforward_poses",
+]
+
+DEPTH_DIR = "depth"
+"""Subdirectory of the capture holding one ``<image name>.npy`` depth map each."""
 
 
 @dataclass
@@ -28,6 +40,8 @@ class FeedForwardConfig:
     """Drop the least confident fraction of depth pixels from the initial points."""
     max_points: int = 100_000
     """Initial point budget, comparable to an SfM cloud; densification adds detail."""
+    prior_conf_quantile: float = 0.2
+    """Saved depth priors mark the least confident fraction of pixels unknown (0)."""
     seed: int = 0
 
 
@@ -50,6 +64,8 @@ def run_feedforward_poses(
     Writes a COLMAP binary model to ``out_root/sparse/0`` with cameras at the
     original image resolution and a confidence-filtered, depth-fused point
     cloud, so the rest of the capture pipeline consumes it like SfM output.
+    Per-frame depth maps go to ``out_root/depth/<name>.npy`` (float16 at the
+    model's processing size; ``0`` = unknown), see :func:`load_depth_prior`.
     """
     import mlx.core as mx
 
@@ -78,8 +94,37 @@ def run_feedforward_poses(
     mx.clear_cache()
     names = [os.path.basename(p) for p in image_paths]
     sparse_dir = save_colmap(out_root, pred.cameras(original_size=True), names, points, colors)
+    _save_depth_priors(pred, names, os.path.join(out_root, DEPTH_DIR), cfg.prior_conf_quantile)
     seconds = time.perf_counter() - t0
     log(f"  {cfg.model}: {len(pred)} cameras, {len(points)} points in {seconds:.1f}s")
     return FeedForwardResult(
         sparse_dir=sparse_dir, num_views=len(pred), num_points=len(points), seconds=seconds
     )
+
+
+def _save_depth_priors(pred, names: list[str], depth_dir: str, conf_quantile: float) -> None:
+    os.makedirs(depth_dir, exist_ok=True)
+    depth = np.array(pred.depth, dtype=np.float32)
+    conf = np.array(pred.depth_conf)
+    depth[conf < np.quantile(conf, conf_quantile)] = 0.0
+    for name, d in zip(names, depth):
+        np.save(os.path.join(depth_dir, f"{name}.npy"), d.astype(np.float16))
+
+
+def load_depth_prior(path: str, size: tuple[int, int]):
+    """Load a saved depth prior resized to ``size = (width, height)``.
+
+    Unknown pixels (``0``) stay unknown: depth and validity are resized
+    separately and pixels touched by an unknown neighbor are dropped.
+    """
+    import mlx.core as mx
+    from PIL import Image
+
+    depth = np.load(path).astype(np.float32)
+    known = (depth > 0).astype(np.float32)
+
+    def resize(a: np.ndarray) -> np.ndarray:
+        return np.asarray(Image.fromarray(a, mode="F").resize(size, Image.Resampling.BILINEAR))
+
+    resized, valid = resize(depth), resize(known)
+    return mx.array(np.where(valid > 0.999, resized, 0.0).astype(np.float32))
